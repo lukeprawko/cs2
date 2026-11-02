@@ -95,6 +95,13 @@ export const Menu: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [screenState, modeTab, lobby.inRoom]);
 
+  // Attempt connection when user enters online tab
+  useEffect(() => {
+    if (modeTab === 'online') {
+      multiplayerClient.connect();
+    }
+  }, [modeTab, serverUrl]);
+
   const isDotOnly = crosshairSize === 0 && crosshairDot;
 
   const renderCrosshairControls = () => {
@@ -925,18 +932,49 @@ export const Menu: React.FC = () => {
         {/* TAB 2: MULTIPLAYER ONLINE LOBBY SETUP */}
         {modeTab === 'online' && (
           <div className="space-y-3.5">
-            {/* Hosting explanation when playing on GitHub Pages */}
-            {typeof window !== 'undefined' &&
-              window.location.hostname.includes('github.io') && (
-                <div className="p-3 rounded-[4px] bg-sky-950/60 border border-sky-500/35 text-[11px] leading-relaxed text-sky-200">
-                  <span className="font-bold text-sky-400">ℹ️ Hosting statyczny:</span>{' '}
-                  GitHub Pages serwuje pliki grafiki i kodu gry. Tryb{' '}
-                  <b>Mecz 5v5 (z botami)</b> działa w 100% w przeglądarce. Do gry w{' '}
-                  <b>Multi ze znajomymi</b> przez internet serwer Node.js (
-                  <code className="text-amber-300">server.ts</code>) musi być
-                  uruchomiony w chmurze (np. darmowy Render.com) lub lokalnie na PC.
+            {/* Status & Prominent Server Alert Banner */}
+            {!lobby.connected ? (
+              <div className="p-3.5 rounded-[4px] bg-red-950/80 border border-red-500/60 text-xs text-red-200 shadow-lg">
+                <div className="flex items-center gap-2 font-extrabold uppercase tracking-wider text-red-400 mb-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                  <span>Brak połączenia z serwerem multiplayer</span>
                 </div>
-              )}
+                <p className="text-[11px] text-zinc-300 leading-relaxed mb-3">
+                  GitHub Pages serwuje wyłącznie pliki gry (tryb <b>Mecz 5v5</b> działa od razu).
+                  Do gry <b>Multi ze znajomymi</b> przez sieć potrzebny jest działający serwer Node.js (<code>server.ts</code>).
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <a
+                    href="https://render.com/deploy?repo=https://github.com/lukeprawko/cs2"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 py-1.5 px-2.5 text-center bg-amber-500 hover:bg-amber-400 text-zinc-950 text-[11px] font-extrabold uppercase tracking-wider rounded transition-colors shadow"
+                  >
+                    🚀 Uruchom darmowy serwer 24/7 (Render)
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      audioEngine.playUIClick(false);
+                      multiplayerClient.connect();
+                    }}
+                    className="py-1.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold uppercase tracking-wider rounded border border-white/10 transition-colors"
+                  >
+                    Ponów próbę
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-2.5 rounded-[4px] bg-emerald-950/70 border border-emerald-500/50 text-xs text-emerald-300 flex items-center justify-between shadow">
+                <div className="flex items-center gap-2 font-bold">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>Połączono z serwerem gry!</span>
+                </div>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-900/60 px-2 py-0.5 rounded">
+                  Gotowy do gry
+                </span>
+              </div>
+            )}
 
             <div>
               <label
@@ -975,7 +1013,7 @@ export const Menu: React.FC = () => {
               <input
                 id="server-url-input"
                 type="text"
-                placeholder="np. wss://moj-serwer.onrender.com lub ws://localhost:3000"
+                placeholder="np. wss://twoj-serwer.onrender.com lub ws://localhost:3000"
                 value={serverUrl}
                 onChange={(e) => setServerUrl(e.target.value)}
                 className="w-full px-3 py-1.5 rounded-[4px] bg-zinc-900 border border-white/15 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
@@ -1009,13 +1047,20 @@ export const Menu: React.FC = () => {
 
             <button
               type="button"
-              onClick={() =>
+              onClick={() => {
+                if (!lobby.connected) {
+                  audioEngine.playUIClick(false);
+                  useGameStore.getState().setLobbyState({
+                    error: 'Brak połączenia z serwerem gry! Uruchom serwer Node.js na Render.com lub lokalnie na PC.',
+                  });
+                  return;
+                }
                 multiplayerClient.createRoom(
                   playerName,
                   preferredTeam,
                   createWithBots
-                )
-              }
+                );
+              }}
               className="w-full py-2.5 rounded-[4px] bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold uppercase tracking-wider text-xs transition-colors"
             >
               Utwórz nowy pokój (Host)
@@ -1043,13 +1088,20 @@ export const Menu: React.FC = () => {
                 <button
                   type="button"
                   disabled={joinCodeInput.trim().length < 4}
-                  onClick={() =>
+                  onClick={() => {
+                    if (!lobby.connected) {
+                      audioEngine.playUIClick(false);
+                      useGameStore.getState().setLobbyState({
+                        error: 'Brak połączenia z serwerem gry! Uruchom serwer Node.js na Render.com lub lokalnie na PC.',
+                      });
+                      return;
+                    }
                     multiplayerClient.joinRoom(
                       joinCodeInput,
                       playerName,
                       preferredTeam
-                    )
-                  }
+                    );
+                  }}
                   className="px-4 py-2 rounded-[4px] bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 border border-white/15 text-xs font-bold uppercase tracking-wider text-zinc-100"
                 >
                   Dołącz
