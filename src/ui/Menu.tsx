@@ -932,47 +932,16 @@ export const Menu: React.FC = () => {
         {/* TAB 2: MULTIPLAYER ONLINE LOBBY SETUP */}
         {modeTab === 'online' && (
           <div className="space-y-3.5">
-            {/* Status & Prominent Server Alert Banner */}
+            {/* Minimalistyczny status połączenia */}
             {!lobby.connected ? (
-              <div className="p-3.5 rounded-[4px] bg-red-950/80 border border-red-500/60 text-xs text-red-200 shadow-lg">
-                <div className="flex items-center gap-2 font-extrabold uppercase tracking-wider text-red-400 mb-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
-                  <span>Brak połączenia z serwerem multiplayer</span>
-                </div>
-                <p className="text-[11px] text-zinc-300 leading-relaxed mb-3">
-                  GitHub Pages serwuje wyłącznie pliki gry (tryb <b>Mecz 5v5</b> działa od razu).
-                  Do gry <b>Multi ze znajomymi</b> przez sieć potrzebny jest działający serwer Node.js (<code>server.ts</code>).
-                </p>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <a
-                    href="https://render.com/deploy?repo=https://github.com/lukeprawko/cs2"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex-1 py-1.5 px-2.5 text-center bg-amber-500 hover:bg-amber-400 text-zinc-950 text-[11px] font-extrabold uppercase tracking-wider rounded transition-colors shadow"
-                  >
-                    🚀 Uruchom darmowy serwer 24/7 (Render)
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audioEngine.playUIClick(false);
-                      multiplayerClient.connect();
-                    }}
-                    className="py-1.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-bold uppercase tracking-wider rounded border border-white/10 transition-colors"
-                  >
-                    Ponów próbę
-                  </button>
-                </div>
+              <div className="flex items-center gap-2 px-3 py-2 rounded-[4px] bg-red-950/50 border border-red-500/35 text-xs font-semibold text-red-400">
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                <span>Brak połączenia z serwerem</span>
               </div>
             ) : (
-              <div className="p-2.5 rounded-[4px] bg-emerald-950/70 border border-emerald-500/50 text-xs text-emerald-300 flex items-center justify-between shadow">
-                <div className="flex items-center gap-2 font-bold">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Połączono z serwerem gry!</span>
-                </div>
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 bg-emerald-900/60 px-2 py-0.5 rounded">
-                  Gotowy do gry
-                </span>
+              <div className="flex items-center gap-2 px-3 py-2 rounded-[4px] bg-emerald-950/50 border border-emerald-500/35 text-xs font-semibold text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Połączono z serwerem</span>
               </div>
             )}
 
@@ -995,21 +964,12 @@ export const Menu: React.FC = () => {
 
             {/* Configurable WebSocket Server Address */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label
-                  htmlFor="server-url-input"
-                  className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400"
-                >
-                  Adres serwera multiplayer (opcjonalny)
-                </label>
-                <span
-                  className={`text-[10px] font-bold uppercase tracking-wider ${
-                    lobby.connected ? 'text-emerald-400' : 'text-zinc-500'
-                  }`}
-                >
-                  {lobby.connected ? '● Połączono' : '○ Rozłączony'}
-                </span>
-              </div>
+              <label
+                htmlFor="server-url-input"
+                className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1"
+              >
+                Adres serwera multiplayer (opcjonalny)
+              </label>
               <input
                 id="server-url-input"
                 type="text"
@@ -1051,7 +1011,7 @@ export const Menu: React.FC = () => {
                 if (!lobby.connected) {
                   audioEngine.playUIClick(false);
                   useGameStore.getState().setLobbyState({
-                    error: 'Brak połączenia z serwerem gry! Uruchom serwer Node.js na Render.com lub lokalnie na PC.',
+                    error: 'Brak połączenia z serwerem',
                   });
                   return;
                 }
@@ -1092,7 +1052,7 @@ export const Menu: React.FC = () => {
                     if (!lobby.connected) {
                       audioEngine.playUIClick(false);
                       useGameStore.getState().setLobbyState({
-                        error: 'Brak połączenia z serwerem gry! Uruchom serwer Node.js na Render.com lub lokalnie na PC.',
+                        error: 'Brak połączenia z serwerem',
                       });
                       return;
                     }
@@ -1108,11 +1068,6 @@ export const Menu: React.FC = () => {
                 </button>
               </div>
             </div>
-            {lobby.error && (
-              <div className="p-2.5 rounded-[4px] bg-red-950/70 border border-red-500/40 text-xs text-red-300 leading-relaxed">
-                {lobby.error}
-              </div>
-            )}
           </div>
         )}
 

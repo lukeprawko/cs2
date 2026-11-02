@@ -105,12 +105,9 @@ class MultiplayerClientManager {
       });
 
       ws.addEventListener('error', () => {
-        const isGh = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
         useGameStore.getState().setLobbyState({
           connected: false,
-          error: isGh
-            ? 'GitHub Pages to darmowy hosting statyczny (brak serwera Node.js). Aby grać w Multi przez internet, uruchom server.ts w chmurze (np. darmowy Render.com) i wpisz poniżej jego adres!'
-            : 'Nie udało się połączyć z serwerem gry WebSocket.',
+          error: 'Brak połączenia z serwerem',
         });
       });
 
