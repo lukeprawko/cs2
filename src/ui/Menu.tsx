@@ -962,24 +962,6 @@ export const Menu: React.FC = () => {
               />
             </div>
 
-            {/* Configurable WebSocket Server Address */}
-            <div>
-              <label
-                htmlFor="server-url-input"
-                className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-1"
-              >
-                Adres serwera multiplayer (opcjonalny)
-              </label>
-              <input
-                id="server-url-input"
-                type="text"
-                placeholder="np. wss://twoj-serwer.onrender.com lub ws://localhost:3000"
-                value={serverUrl}
-                onChange={(e) => setServerUrl(e.target.value)}
-                className="w-full px-3 py-1.5 rounded-[4px] bg-zinc-900 border border-white/15 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
             {/* Bot Toggle Before Room Creation (Default OFF) */}
             <div className="flex items-center justify-between p-2.5 rounded-[4px] bg-zinc-900/80 border border-white/10">
               <div>

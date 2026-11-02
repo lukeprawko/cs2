@@ -70,24 +70,14 @@ class MultiplayerClientManager {
       return this.ws;
     }
 
-    const customUrl = useSettingsStore.getState().serverUrl?.trim();
-    let url: string;
-    if (customUrl) {
-      if (customUrl.startsWith('ws://') || customUrl.startsWith('wss://')) {
-        url = customUrl.endsWith('/ws-game')
-          ? customUrl
-          : `${customUrl.replace(/\/$/, '')}/ws-game`;
-      } else if (customUrl.startsWith('http://')) {
-        url = customUrl.replace('http://', 'ws://').replace(/\/$/, '') + '/ws-game';
-      } else if (customUrl.startsWith('https://')) {
-        url = customUrl.replace('https://', 'wss://').replace(/\/$/, '') + '/ws-game';
-      } else {
-        url = `wss://${customUrl.replace(/\/$/, '')}/ws-game`;
-      }
-    } else {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      url = `${protocol}//${window.location.host}/ws-game`;
-    }
+    const isLocal =
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1');
+
+    const url = isLocal
+      ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws-game`
+      : 'wss://cs2-dust-alley-server-ldgh.onrender.com/ws-game';
 
     try {
       const ws = new WebSocket(url);
@@ -134,7 +124,7 @@ class MultiplayerClientManager {
     } catch (e) {
       useGameStore.getState().setLobbyState({
         connected: false,
-        error: 'Nieprawidłowy adres serwera WebSocket: ' + String(e),
+        error: 'Brak połączenia z serwerem',
       });
       return null;
     }
