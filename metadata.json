@@ -1,0 +1,6 @@
+{
+  "name": "Dust Alley — Tactical 3D FPS",
+  "description": "Taktyczna strzelanka FPS 3D (5v5 plant/defuse bomb) na mapie Dust Alley z zaawansowanym AI botów, pełną ekonomią, proceduralną grafiką PBR, dźwiękiem 3D Web Audio oraz trybem multiplayer online.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
