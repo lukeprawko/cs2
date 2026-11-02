@@ -36,6 +36,7 @@ export const Menu: React.FC = () => {
   const dynamicLights = useSettingsStore((s) => s.dynamicLights);
   const exposure = useSettingsStore((s) => s.exposure);
   const showFps = useSettingsStore((s) => s.showFps);
+  const serverUrl = useSettingsStore((s) => s.serverUrl);
 
   const crosshairColor = useSettingsStore((s) => s.crosshairColor);
   const crosshairSize = useSettingsStore((s) => s.crosshairSize);
@@ -58,6 +59,7 @@ export const Menu: React.FC = () => {
   const setDynamicLights = useSettingsStore((s) => s.setDynamicLights);
   const setExposure = useSettingsStore((s) => s.setExposure);
   const setShowFps = useSettingsStore((s) => s.setShowFps);
+  const setServerUrl = useSettingsStore((s) => s.setServerUrl);
 
   const setCrosshairColor = useSettingsStore((s) => s.setCrosshairColor);
   const setCrosshairSize = useSettingsStore((s) => s.setCrosshairSize);
@@ -923,6 +925,19 @@ export const Menu: React.FC = () => {
         {/* TAB 2: MULTIPLAYER ONLINE LOBBY SETUP */}
         {modeTab === 'online' && (
           <div className="space-y-3.5">
+            {/* Hosting explanation when playing on GitHub Pages */}
+            {typeof window !== 'undefined' &&
+              window.location.hostname.includes('github.io') && (
+                <div className="p-3 rounded-[4px] bg-sky-950/60 border border-sky-500/35 text-[11px] leading-relaxed text-sky-200">
+                  <span className="font-bold text-sky-400">ℹ️ Hosting statyczny:</span>{' '}
+                  GitHub Pages serwuje pliki grafiki i kodu gry. Tryb{' '}
+                  <b>Mecz 5v5 (z botami)</b> działa w 100% w przeglądarce. Do gry w{' '}
+                  <b>Multi ze znajomymi</b> przez internet serwer Node.js (
+                  <code className="text-amber-300">server.ts</code>) musi być
+                  uruchomiony w chmurze (np. darmowy Render.com) lub lokalnie na PC.
+                </div>
+              )}
+
             <div>
               <label
                 htmlFor="mp-nick"
@@ -937,6 +952,33 @@ export const Menu: React.FC = () => {
                 value={playerName}
                 onChange={(e) => setPlayerName(e.target.value)}
                 className="w-full px-3 py-2 rounded-[4px] bg-zinc-900 border border-white/15 text-sm text-zinc-100"
+              />
+            </div>
+
+            {/* Configurable WebSocket Server Address */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label
+                  htmlFor="server-url-input"
+                  className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400"
+                >
+                  Adres serwera multiplayer (opcjonalny)
+                </label>
+                <span
+                  className={`text-[10px] font-bold uppercase tracking-wider ${
+                    lobby.connected ? 'text-emerald-400' : 'text-zinc-500'
+                  }`}
+                >
+                  {lobby.connected ? '● Połączono' : '○ Rozłączony'}
+                </span>
+              </div>
+              <input
+                id="server-url-input"
+                type="text"
+                placeholder="np. wss://moj-serwer.onrender.com lub ws://localhost:3000"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-[4px] bg-zinc-900 border border-white/15 text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
               />
             </div>
 
@@ -1015,7 +1057,9 @@ export const Menu: React.FC = () => {
               </div>
             </div>
             {lobby.error && (
-              <p className="text-xs text-red-400">{lobby.error}</p>
+              <div className="p-2.5 rounded-[4px] bg-red-950/70 border border-red-500/40 text-xs text-red-300 leading-relaxed">
+                {lobby.error}
+              </div>
             )}
           </div>
         )}

@@ -1,6 +1,7 @@
 import { audioEngine } from '../engine/AudioEngine';
 import { BombData } from './BombLogic';
 import { KillFeedEntry, RoundEndSummary, RoundPhase, useGameStore } from '../store/useGameStore';
+import { useSettingsStore } from '../store/useSettingsStore';
 import { Team, WeaponId } from './WeaponsDB';
 
 export interface NetActorSnapshot {
@@ -60,7 +61,7 @@ class MultiplayerClientManager {
       ) => void)
     | null = null;
 
-  public connect(): WebSocket {
+  public connect(): WebSocket | null {
     if (
       this.ws &&
       (this.ws.readyState === WebSocket.OPEN ||
@@ -69,48 +70,83 @@ class MultiplayerClientManager {
       return this.ws;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${window.location.host}/ws-game`;
-    const ws = new WebSocket(url);
-    this.ws = ws;
-
-    ws.addEventListener('open', () => {
-      useGameStore.getState().setLobbyState({
-        connected: true,
-        error: null,
-      });
-      while (this.pendingQueue.length > 0 && ws.readyState === WebSocket.OPEN) {
-        const msg = this.pendingQueue.shift();
-        if (msg) ws.send(msg);
+    const customUrl = useSettingsStore.getState().serverUrl?.trim();
+    let url: string;
+    if (customUrl) {
+      if (customUrl.startsWith('ws://') || customUrl.startsWith('wss://')) {
+        url = customUrl.endsWith('/ws-game')
+          ? customUrl
+          : `${customUrl.replace(/\/$/, '')}/ws-game`;
+      } else if (customUrl.startsWith('http://')) {
+        url = customUrl.replace('http://', 'ws://').replace(/\/$/, '') + '/ws-game';
+      } else if (customUrl.startsWith('https://')) {
+        url = customUrl.replace('https://', 'wss://').replace(/\/$/, '') + '/ws-game';
+      } else {
+        url = `wss://${customUrl.replace(/\/$/, '')}/ws-game`;
       }
-    });
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      url = `${protocol}//${window.location.host}/ws-game`;
+    }
 
-    ws.addEventListener('close', () => {
+    try {
+      const ws = new WebSocket(url);
+      this.ws = ws;
+
+      ws.addEventListener('open', () => {
+        useGameStore.getState().setLobbyState({
+          connected: true,
+          error: null,
+        });
+        while (this.pendingQueue.length > 0 && ws.readyState === WebSocket.OPEN) {
+          const msg = this.pendingQueue.shift();
+          if (msg) ws.send(msg);
+        }
+      });
+
+      ws.addEventListener('error', () => {
+        const isGh = typeof window !== 'undefined' && window.location.hostname.includes('github.io');
+        useGameStore.getState().setLobbyState({
+          connected: false,
+          error: isGh
+            ? 'GitHub Pages to darmowy hosting statyczny (brak serwera Node.js). Aby grać w Multi przez internet, uruchom server.ts w chmurze (np. darmowy Render.com) i wpisz poniżej jego adres!'
+            : 'Nie udało się połączyć z serwerem gry WebSocket.',
+        });
+      });
+
+      ws.addEventListener('close', () => {
+        useGameStore.getState().setLobbyState({
+          connected: false,
+          inRoom: false,
+          roomCode: '',
+          isHost: false,
+          players: [],
+        });
+      });
+
+      ws.addEventListener('message', (event) => {
+        try {
+          const packet = JSON.parse(String(event.data)) as WsPacket;
+          this.handleServerPacket(packet);
+        } catch {
+          // Ignore malformed packet
+        }
+      });
+
+      return ws;
+    } catch (e) {
       useGameStore.getState().setLobbyState({
         connected: false,
-        inRoom: false,
-        roomCode: '',
-        isHost: false,
-        players: [],
+        error: 'Nieprawidłowy adres serwera WebSocket: ' + String(e),
       });
-    });
-
-    ws.addEventListener('message', (event) => {
-      try {
-        const packet = JSON.parse(String(event.data)) as WsPacket;
-        this.handleServerPacket(packet);
-      } catch {
-        // Ignore malformed packet
-      }
-    });
-
-    return ws;
+      return null;
+    }
   }
 
   private emit(type: string, payload?: unknown): void {
     const raw = JSON.stringify({ type, payload });
     const ws = this.connect();
-    if (ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(raw);
     } else {
       this.pendingQueue.push(raw);

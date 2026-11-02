@@ -29,6 +29,7 @@ export interface SettingsState {
   dynamicLights: boolean;
   exposure: number;
   showFps: boolean;
+  serverUrl: string;
 
   // Crosshair customization
   crosshairColor: CrosshairColor;
@@ -53,6 +54,7 @@ export interface SettingsState {
   setDynamicLights: (enabled: boolean) => void;
   setExposure: (exp: number) => void;
   setShowFps: (show: boolean) => void;
+  setServerUrl: (url: string) => void;
 
   setCrosshairColor: (c: CrosshairColor) => void;
   setCrosshairSize: (size: number) => void;
@@ -80,6 +82,7 @@ interface StoredSettings {
   dynamicLights: boolean;
   exposure: number;
   showFps: boolean;
+  serverUrl?: string;
   crosshairColor: CrosshairColor;
   crosshairSize: number;
   crosshairGap: number;
@@ -126,6 +129,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   dynamicLights: initial.dynamicLights ?? true,
   exposure: initial.exposure ?? 0.85,
   showFps: initial.showFps ?? true,
+  serverUrl: initial.serverUrl ?? '',
 
   crosshairColor: initial.crosshairColor || 'green',
   crosshairSize: initial.crosshairSize ?? 7,
@@ -204,6 +208,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowFps: (showFps) => {
     set({ showFps });
+    saveSettings(get());
+  },
+  setServerUrl: (serverUrl) => {
+    set({ serverUrl });
     saveSettings(get());
   },
 
