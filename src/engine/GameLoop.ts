@@ -325,6 +325,7 @@ export class GameSimulation {
     this.smokeClouds = [];
     this.particlePool.clearAll();
     this.tracerPool.clearAll();
+    this.decalPool.clearAll();
     useGameStore.getState().updateHUD({ roundEndSummary: null, buyMenuOpen: false });
 
     let ctIdx = 0;
@@ -2046,6 +2047,7 @@ export class GameSimulation {
     initial: boolean
   ): void {
     const prevRoundNumber = this.roundNumber;
+    const prevRoundPhase = this.roundPhase;
     this.roundPhase = snap.roundPhase;
     this.roundNumber = snap.roundNumber;
     this.ctScore = snap.ctScore;
@@ -2054,6 +2056,17 @@ export class GameSimulation {
     this.bomb = snap.bomb;
 
     const isNewRound = initial || snap.roundNumber !== prevRoundNumber;
+    const enteredBuyPhase = snap.roundPhase === 'buy' && prevRoundPhase !== 'buy';
+
+    if (isNewRound || enteredBuyPhase) {
+      // Clear all active smoke clouds, in-flight grenades, decals & particles on new round start
+      this.smokeClouds = [];
+      this.grenades = [];
+      this.decalPool.clearAll();
+      this.particlePool.clearAll();
+      this.tracerPool.clearAll();
+      useGameStore.getState().updateHUD({ roundEndSummary: null, buyMenuOpen: false });
+    }
 
     // Remove actors that are no longer in the room snapshot
     const validIds = new Set(snap.actors.map((a) => a.id));

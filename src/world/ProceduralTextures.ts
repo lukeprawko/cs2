@@ -76,9 +76,9 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
   const genericBump = registerTex(bumpCanvas, false, 4, 2);
 
   // 1. TACTICAL ASHLAR STONE INNER WALL (`asphalt` in map data)
-  // Weathered dark fortress stone masonry blocks with dark coping trim matching reference map
+  // Weathered dark fortress stone masonry blocks with combat battle scars, bullet gouges & tactical markings
   const [darkWallCanvas, darkWallCtx] = createCanvas(512, 512);
-  darkWallCtx.fillStyle = '#12151b'; // Dark stone mortar
+  darkWallCtx.fillStyle = '#101318'; // Dark stone mortar
   darkWallCtx.fillRect(0, 0, 512, 512);
 
   const wallRowH = 512 / 6;
@@ -90,17 +90,29 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
       const bw = 124;
       const bh = wallRowH - 4;
       const hash = Math.abs(Math.sin(colX * 17.1 + rowY * 31.7) * 43758.5);
-      const shade = 28 + Math.floor(hash * 14);
+      const shade = 32 + Math.floor(hash * 18);
       darkWallCtx.fillStyle = `rgb(${shade}, ${shade + 2}, ${shade + 5})`;
       darkWallCtx.fillRect(colX + 2, rowY + 2, bw, bh);
 
       // Chiseled block highlights & shadows
-      darkWallCtx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      darkWallCtx.fillStyle = 'rgba(255, 255, 255, 0.09)';
       darkWallCtx.fillRect(colX + 2, rowY + 2, bw, 2);
       darkWallCtx.fillRect(colX + 2, rowY + 2, 2, bh);
-      darkWallCtx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      darkWallCtx.fillStyle = 'rgba(0, 0, 0, 0.55)';
       darkWallCtx.fillRect(colX + 2, rowY + bh, bw, 2);
       darkWallCtx.fillRect(colX + bw, rowY + 2, 2, bh);
+
+      // Battle gouges & bullet chips in stone
+      if ((hash * 7) % 1 > 0.6) {
+        darkWallCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        darkWallCtx.beginPath();
+        darkWallCtx.arc(colX + 25 + (hash * 50) % 70, rowY + 12 + (hash * 30) % 40, 3.5, 0, Math.PI * 2);
+        darkWallCtx.fill();
+        darkWallCtx.fillStyle = 'rgba(180, 180, 185, 0.4)';
+        darkWallCtx.beginPath();
+        darkWallCtx.arc(colX + 25 + (hash * 50) % 70, rowY + 12 + (hash * 30) % 40, 1.5, 0, Math.PI * 2);
+        darkWallCtx.fill();
+      }
     }
   }
 
@@ -112,19 +124,26 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
   darkWallCtx.fillStyle = 'rgba(0, 0, 0, 0.65)';
   darkWallCtx.fillRect(0, 24, 512, 2);
 
-  // Bottom subtle damp stone base
-  const wallDirtGrad = darkWallCtx.createLinearGradient(0, 420, 0, 512);
+  // Tactical spray-painted military directional arrow & zone text
+  darkWallCtx.fillStyle = 'rgba(245, 158, 11, 0.75)'; // Amber military stencil
+  darkWallCtx.font = 'bold 16px monospace';
+  darkWallCtx.fillText('◄ BOMBSITE A', 32, 260);
+  darkWallCtx.fillText('BOMBSITE B ►', 340, 260);
+
+  // Bottom subtle damp stone base & dust accumulation
+  const wallDirtGrad = darkWallCtx.createLinearGradient(0, 390, 0, 512);
   wallDirtGrad.addColorStop(0, 'rgba(20, 22, 28, 0)');
-  wallDirtGrad.addColorStop(1, 'rgba(12, 14, 18, 0.55)');
+  wallDirtGrad.addColorStop(0.7, 'rgba(12, 14, 18, 0.6)');
+  wallDirtGrad.addColorStop(1, 'rgba(60, 48, 32, 0.5)'); // Desert dust rim
   darkWallCtx.fillStyle = wallDirtGrad;
-  darkWallCtx.fillRect(0, 420, 512, 92);
+  darkWallCtx.fillRect(0, 390, 512, 122);
   addNoise(darkWallCtx, 512, 512, 0.08);
   const darkWallMap = registerTex(darkWallCanvas, true, 4, 1);
 
   // 2. FORTRESS PERIMETER ASHLAR STONE WALL (`concrete`)
-  // Heavy dressed medieval stone blocks with battlement coping matching reference map
+  // Heavy dressed medieval stone blocks with battle wear, soot, and sector stenciling
   const [concCanvas, concCtx] = createCanvas(512, 512);
-  concCtx.fillStyle = '#1a1e24'; // Mortar
+  concCtx.fillStyle = '#16191f'; // Mortar
   concCtx.fillRect(0, 0, 512, 512);
 
   for (let row = 0; row < 5; row++) {
@@ -136,46 +155,87 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
       const bw = 155;
       const bh = rowH - 5;
       const hash = Math.abs(Math.sin(colX * 23.3 + rowY * 41.9) * 43758.5);
-      const shade = 48 + Math.floor(hash * 18);
-      concCtx.fillStyle = `rgb(${shade}, ${shade + 1}, ${shade + 3})`;
+      const shade = 52 + Math.floor(hash * 22);
+      concCtx.fillStyle = `rgb(${shade}, ${shade + 2}, ${shade + 4})`;
       concCtx.fillRect(colX + 2, rowY + 2, bw, bh);
 
       // Chiseled stone block bevels
-      concCtx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+      concCtx.fillStyle = 'rgba(255, 255, 255, 0.12)';
       concCtx.fillRect(colX + 2, rowY + 2, bw, 2);
       concCtx.fillRect(colX + 2, rowY + 2, 2, bh);
-      concCtx.fillStyle = 'rgba(0, 0, 0, 0.48)';
+      concCtx.fillStyle = 'rgba(0, 0, 0, 0.55)';
       concCtx.fillRect(colX + 2, rowY + bh, bw, 2);
       concCtx.fillRect(colX + bw, rowY + 2, 2, bh);
+
+      // Battle bullet spalls
+      if ((hash * 13) % 1 > 0.55) {
+        concCtx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+        concCtx.beginPath();
+        concCtx.arc(colX + 30 + (hash * 70) % 90, rowY + 15 + (hash * 40) % 55, 4, 0, Math.PI * 2);
+        concCtx.fill();
+        concCtx.fillStyle = 'rgba(220, 215, 210, 0.55)';
+        concCtx.beginPath();
+        concCtx.arc(colX + 30 + (hash * 70) % 90, rowY + 15 + (hash * 40) % 55, 1.8, 0, Math.PI * 2);
+        concCtx.fill();
+      }
     }
   }
 
   // Heavy stone battlement coping band at top
   concCtx.fillStyle = '#222730';
   concCtx.fillRect(0, 0, 512, 30);
-  concCtx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+  concCtx.fillStyle = 'rgba(255, 255, 255, 0.20)';
   concCtx.fillRect(0, 0, 512, 4);
-  concCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  concCtx.fillStyle = 'rgba(0, 0, 0, 0.65)';
   concCtx.fillRect(0, 28, 512, 2);
 
-  const concDirt = concCtx.createLinearGradient(0, 410, 0, 512);
+  // Black explosive soot wash mark
+  const sootGrad = concCtx.createRadialGradient(260, 210, 10, 260, 210, 95);
+  sootGrad.addColorStop(0, 'rgba(10, 10, 12, 0.7)');
+  sootGrad.addColorStop(0.6, 'rgba(20, 20, 25, 0.35)');
+  sootGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  concCtx.fillStyle = sootGrad;
+  concCtx.fillRect(160, 110, 200, 200);
+
+  // Tactical stencil on wall
+  concCtx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+  concCtx.font = 'bold 20px monospace';
+  concCtx.fillText('MIL-SEC // DUST-4', 48, 160);
+
+  const concDirt = concCtx.createLinearGradient(0, 390, 0, 512);
   concDirt.addColorStop(0, 'rgba(18, 21, 26, 0)');
-  concDirt.addColorStop(1, 'rgba(12, 14, 18, 0.6)');
+  concDirt.addColorStop(0.6, 'rgba(12, 14, 18, 0.6)');
+  concDirt.addColorStop(1, 'rgba(65, 52, 35, 0.55)'); // Combat dust wash
   concCtx.fillStyle = concDirt;
-  concCtx.fillRect(0, 410, 512, 102);
+  concCtx.fillRect(0, 390, 512, 122);
   addNoise(concCtx, 512, 512, 0.09);
   const concreteMap = registerTex(concCanvas, true, 4, 1);
 
-  // 3. SANDSTONE PLASTER
+  // 3. SANDSTONE PLASTER (Sun-baked cracked desert walls)
   const [sandCanvas, sandCtx] = createCanvas(512, 512);
-  sandCtx.fillStyle = '#c4ab89';
+  sandCtx.fillStyle = '#c8b292';
   sandCtx.fillRect(0, 0, 512, 512);
-  addNoise(sandCtx, 512, 512, 0.1);
+  // Stucco flaking revealing raw brick undercoat
+  sandCtx.fillStyle = 'rgba(140, 85, 60, 0.35)';
+  sandCtx.fillRect(40, 80, 110, 60);
+  sandCtx.fillRect(320, 290, 140, 75);
+  // Combat cracks
+  sandCtx.strokeStyle = 'rgba(70, 50, 35, 0.4)';
+  sandCtx.lineWidth = 1.5;
+  sandCtx.beginPath();
+  sandCtx.moveTo(40, 80);
+  sandCtx.lineTo(90, 110);
+  sandCtx.lineTo(150, 140);
+  sandCtx.moveTo(320, 290);
+  sandCtx.lineTo(370, 330);
+  sandCtx.lineTo(460, 365);
+  sandCtx.stroke();
+  addNoise(sandCtx, 512, 512, 0.12);
   const sandstoneMap = registerTex(sandCanvas, true, 2, 1);
 
   // 4. WEATHERED BRICK
   const [brickCanvas, brickCtx] = createCanvas(512, 512);
-  brickCtx.fillStyle = '#8b6852';
+  brickCtx.fillStyle = '#7a5440';
   brickCtx.fillRect(0, 0, 512, 512);
   const rows = 12;
   const cols = 6;
@@ -184,106 +244,143 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
   for (let r = 0; r < rows; r++) {
     const offset = (r % 2) * (bw * 0.5);
     for (let c = -1; c <= cols; c++) {
-      const shade = 125 + Math.floor(Math.random() * 40);
-      brickCtx.fillStyle = `rgb(${shade}, ${Math.floor(shade * 0.64)}, ${Math.floor(shade * 0.48)})`;
+      const shade = 120 + Math.floor(Math.random() * 45);
+      brickCtx.fillStyle = `rgb(${shade}, ${Math.floor(shade * 0.60)}, ${Math.floor(shade * 0.44)})`;
       brickCtx.fillRect(c * bw + offset + 3, r * bh + 3, bw - 6, bh - 6);
     }
   }
   addNoise(brickCtx, 512, 512, 0.1);
   const brickMap = registerTex(brickCanvas, true, 2, 2);
 
-  // 5. MILITARY WOODEN CRATE (`wood_crate`)
+  // 5. MILITARY MUNITIONS CRATE (`wood_crate`)
+  // Heavy olive-drab/khaki tactical combat supply crate with hazard markings & stencils
   const [woodCanvas, woodCtx] = createCanvas(512, 512);
-  woodCtx.fillStyle = '#8f6339';
+  woodCtx.fillStyle = '#5c4d37'; // Military olive-drab timber
   woodCtx.fillRect(0, 0, 512, 512);
+
   // Horizontal wood grain & slat seams
   for (let y = 0; y < 512; y += 64) {
-    woodCtx.fillStyle = y % 128 === 0 ? 'rgba(0,0,0,0.07)' : 'rgba(255,220,180,0.05)';
+    woodCtx.fillStyle = y % 128 === 0 ? 'rgba(0,0,0,0.14)' : 'rgba(255,230,190,0.06)';
     woodCtx.fillRect(0, y, 512, 64);
-    woodCtx.strokeStyle = '#4a3119';
+    woodCtx.strokeStyle = '#32281a';
     woodCtx.lineWidth = 4;
     woodCtx.beginPath();
     woodCtx.moveTo(0, y);
     woodCtx.lineTo(512, y);
     woodCtx.stroke();
   }
-  // Heavy outer timber frame + diagonal cross-beams
-  woodCtx.lineWidth = 34;
-  woodCtx.strokeStyle = '#6e4a28';
-  woodCtx.strokeRect(17, 17, 478, 478);
-  woodCtx.lineWidth = 26;
+
+  // Heavy outer steel reinforced framing
+  woodCtx.lineWidth = 36;
+  woodCtx.strokeStyle = '#433725';
+  woodCtx.strokeRect(18, 18, 476, 476);
+  woodCtx.lineWidth = 28;
   woodCtx.beginPath();
   woodCtx.moveTo(28, 28);
   woodCtx.lineTo(484, 484);
   woodCtx.moveTo(484, 28);
   woodCtx.lineTo(28, 484);
   woodCtx.stroke();
-  woodCtx.strokeStyle = '#3d2713';
+  woodCtx.strokeStyle = '#221a10';
   woodCtx.lineWidth = 3;
   woodCtx.strokeRect(34, 34, 444, 444);
 
-  // Dark steel corner brackets & bolt rivets
-  const corners = [
+  // Yellow & black hazard warning bars along top & bottom timber
+  for (let hx = 36; hx < 470; hx += 24) {
+    woodCtx.fillStyle = '#f59e0b';
+    woodCtx.beginPath();
+    woodCtx.moveTo(hx, 36);
+    woodCtx.lineTo(hx + 12, 36);
+    woodCtx.lineTo(hx + 4, 52);
+    woodCtx.lineTo(hx - 8, 52);
+    woodCtx.fill();
+    woodCtx.beginPath();
+    woodCtx.moveTo(hx, 460);
+    woodCtx.lineTo(hx + 12, 460);
+    woodCtx.lineTo(hx + 4, 476);
+    woodCtx.lineTo(hx - 8, 476);
+    woodCtx.fill();
+  }
+
+  // Military munitions stencils
+  woodCtx.fillStyle = 'rgba(240, 240, 230, 0.85)';
+  woodCtx.font = 'bold 22px monospace';
+  woodCtx.fillText('ORDNANCE // 7.62 NATO', 70, 180);
+  woodCtx.font = 'bold 16px monospace';
+  woodCtx.fillText('EXPLOSIVE 1.1D - LOT 84', 70, 210);
+  woodCtx.fillText('NET WT: 42.5 KG', 70, 235);
+
+  // Riveted dark iron corner caps
+  const crateCorners = [
     [0, 0],
     [452, 0],
     [0, 452],
     [452, 452],
   ];
-  for (const [cx, cy] of corners) {
-    woodCtx.fillStyle = '#23272e';
+  for (const [cx, cy] of crateCorners) {
+    woodCtx.fillStyle = '#1e2126';
     woodCtx.fillRect(cx, cy, 60, 60);
-    woodCtx.fillStyle = '#525866';
+    woodCtx.fillStyle = '#5f6775';
     woodCtx.beginPath();
-    woodCtx.arc(cx + 18, cy + 18, 4, 0, Math.PI * 2);
-    woodCtx.arc(cx + 42, cy + 42, 4, 0, Math.PI * 2);
+    woodCtx.arc(cx + 18, cy + 18, 4.5, 0, Math.PI * 2);
+    woodCtx.arc(cx + 42, cy + 42, 4.5, 0, Math.PI * 2);
     woodCtx.fill();
   }
-  addNoise(woodCtx, 512, 512, 0.09);
+  addNoise(woodCtx, 512, 512, 0.10);
   const woodCrateMap = registerTex(woodCanvas, true, 1, 1);
 
-  // 6. INDUSTRIAL COBALT BLUE CORRUGATED SHIPPING CONTAINER
-  // Matches the blue shipping containers on B Site, Long A, and T Spawn
+  // 6. INDUSTRIAL CORRUGATED SHIPPING CONTAINER (`metal_container`)
   const [contCanvas, contCtx] = createCanvas(512, 512);
-  contCtx.fillStyle = '#173c66'; // Cobalt industrial container blue
+  contCtx.fillStyle = '#143459'; // Deep industrial cobalt blue
   contCtx.fillRect(0, 0, 512, 512);
 
   const ribW = 24;
   for (let x = 0; x < 512; x += ribW) {
     // Trough shadow
-    contCtx.fillStyle = '#0e2440';
+    contCtx.fillStyle = '#0a1d33';
     contCtx.fillRect(x, 0, 6, 512);
     // Center face
-    contCtx.fillStyle = '#1b4576';
+    contCtx.fillStyle = '#173c66';
     contCtx.fillRect(x + 6, 0, 12, 512);
     // Ridge highlight
-    contCtx.fillStyle = '#2d62a2';
+    contCtx.fillStyle = '#2b5a91';
     contCtx.fillRect(x + 18, 0, 6, 512);
   }
 
   // Steel top and bottom horizontal frame channels
-  contCtx.fillStyle = '#102744';
+  contCtx.fillStyle = '#0f243d';
   contCtx.fillRect(0, 0, 512, 34);
   contCtx.fillRect(0, 478, 512, 34);
   contCtx.fillStyle = 'rgba(255, 255, 255, 0.22)';
   contCtx.fillRect(0, 0, 512, 3);
   contCtx.fillRect(0, 478, 512, 3);
 
+  // Dripping rust streaks down rivets
+  for (const rx of [64, 180, 290, 410]) {
+    const rustGrad = contCtx.createLinearGradient(rx, 34, rx, 180);
+    rustGrad.addColorStop(0, 'rgba(160, 75, 25, 0.7)');
+    rustGrad.addColorStop(0.5, 'rgba(110, 45, 15, 0.4)');
+    rustGrad.addColorStop(1, 'rgba(70, 30, 10, 0)');
+    contCtx.fillStyle = rustGrad;
+    contCtx.fillRect(rx - 8, 34, 16, 150);
+  }
+
   // White industrial shipping stencils
-  contCtx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  contCtx.fillStyle = 'rgba(255, 255, 255, 0.88)';
   contCtx.font = 'bold 24px monospace';
-  contCtx.fillText('MSKU 841920-4', 40, 82);
+  contCtx.fillText('TACTICAL LOGISTICS // 04', 36, 82);
   contCtx.font = 'bold 15px monospace';
-  contCtx.fillText('MAX. GROSS  30,480 KG', 40, 114);
-  contCtx.fillText('PAYLOAD     28,300 KG', 40, 136);
+  contCtx.fillText('HAZMAT CLASS 1 // SEC-B', 36, 114);
+  contCtx.fillText('MAX PAYLOAD: 28,300 KG', 36, 136);
 
   addNoise(contCtx, 512, 512, 0.08);
   const containerMap = registerTex(contCanvas, true, 2, 1);
 
-  // 7. REALISTIC ANCIENT ASHLAR FLAGSTONE & COBBLESTONE GROUND (`sand_ground`)
-  // Recreates the exact distressed dark granite and slate stone paving from reference map
+  // 7. REALISTIC WAR-TORN BATTLE-ZONE FLAGSTONE & GRIT GROUND (`sand_ground`)
+  // Distressed dark stone flagstone paving with vehicle tire tracks, explosion blast marks & combat cracks
   const [groundCanvas, groundCtx] = createCanvas(1024, 1024);
   // Dark granite mortar base
-  groundCtx.fillStyle = '#141210';
+  groundCtx.fillStyle = '#12100d';
   groundCtx.fillRect(0, 0, 1024, 1024);
 
   // Ashlar stone courses: varying row heights for authentic irregular flagstone paving
@@ -294,27 +391,27 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
     let curX = -((r * 47) % 60);
     while (curX < 1024) {
       const sw = 75 + Math.floor(((r * 31 + curX * 17) % 85));
-      const mortarGap = 3;
+      const mortarGap = 3.5;
       const bx = curX + mortarGap;
       const by = curY + mortarGap;
       const bw = Math.min(sw - mortarGap * 2, 1024 - bx);
       const bh = rh - mortarGap * 2;
 
       if (bw > 4 && bh > 4) {
-        // Natural dark stone color palette matching reference map 1:1:
-        // Weathered granite, dark ashlar slate, charcoal river stone, cool basalt
+        // Natural battle-worn dark stone color palette:
+        // Weathered granite, dark slate, charcoal river basalt, dusty sandstone
         const stonePalette = [
-          [72, 67, 62],
-          [84, 78, 71],
-          [62, 58, 54],
-          [76, 71, 65],
-          [88, 81, 73],
-          [65, 61, 57],
+          [76, 70, 64],
+          [88, 81, 74],
+          [64, 59, 54],
+          [82, 75, 68],
+          [94, 86, 77],
+          [68, 63, 58],
         ];
         const hash = Math.abs(Math.sin(bx * 12.9898 + by * 78.233) * 43758.5453);
         const colIdx = Math.floor(hash * stonePalette.length) % stonePalette.length;
         const [baseR, baseG, baseB] = stonePalette[colIdx];
-        const varJitter = ((hash * 11) % 16) - 8;
+        const varJitter = ((hash * 11) % 18) - 9;
         const rVal = Math.max(0, Math.min(255, Math.floor(baseR + varJitter)));
         const gVal = Math.max(0, Math.min(255, Math.floor(baseG + varJitter)));
         const bVal = Math.max(0, Math.min(255, Math.floor(baseB + varJitter)));
@@ -324,21 +421,21 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
         groundCtx.fillRect(bx, by, bw, bh);
 
         // Chiseled stone block bevels
-        groundCtx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+        groundCtx.fillStyle = 'rgba(255, 255, 255, 0.10)';
         groundCtx.fillRect(bx, by, bw, 2);
         groundCtx.fillRect(bx, by, 2, bh);
-        groundCtx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+        groundCtx.fillStyle = 'rgba(0, 0, 0, 0.48)';
         groundCtx.fillRect(bx, by + bh - 2, bw, 2);
         groundCtx.fillRect(bx + bw - 2, by, 2, bh);
 
-        // Surface micro-cracks
-        if (hash % 1 > 0.65) {
-          groundCtx.strokeStyle = 'rgba(15, 13, 11, 0.55)';
-          groundCtx.lineWidth = 1.2;
+        // Surface combat cracks
+        if (hash % 1 > 0.55) {
+          groundCtx.strokeStyle = 'rgba(12, 10, 8, 0.65)';
+          groundCtx.lineWidth = 1.4;
           groundCtx.beginPath();
-          groundCtx.moveTo(bx + bw * 0.25, by + bh * 0.2);
-          groundCtx.lineTo(bx + bw * 0.55, by + bh * 0.5);
-          groundCtx.lineTo(bx + bw * 0.8, by + bh * 0.75);
+          groundCtx.moveTo(bx + bw * 0.2, by + bh * 0.2);
+          groundCtx.lineTo(bx + bw * 0.5, by + bh * 0.55);
+          groundCtx.lineTo(bx + bw * 0.85, by + bh * 0.8);
           groundCtx.stroke();
         }
       }
@@ -347,20 +444,66 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
     curY += rh;
   }
 
-  // Organic soot, grime, and corner shadow vignette
+  // Tactical Military Vehicle Tire Tread Tracks running across the ground
+  const trackCenters = [280, 460, 780, 960];
+  for (const tc of trackCenters) {
+    // Rubber compound dark lane
+    groundCtx.fillStyle = 'rgba(15, 14, 12, 0.35)';
+    groundCtx.fillRect(tc - 32, 0, 64, 1024);
+
+    // Diagonal chevron tire tread cleats
+    groundCtx.strokeStyle = 'rgba(8, 7, 6, 0.45)';
+    groundCtx.lineWidth = 5;
+    for (let ty = 0; ty < 1024; ty += 22) {
+      groundCtx.beginPath();
+      groundCtx.moveTo(tc - 26, ty);
+      groundCtx.lineTo(tc, ty + 10);
+      groundCtx.lineTo(tc + 26, ty);
+      groundCtx.stroke();
+    }
+  }
+
+  // Black explosive blast crater scorch marks
+  const blastSpots: Array<[number, number, number]> = [
+    [320, 260, 110],
+    [740, 680, 130],
+    [520, 840, 85],
+  ];
+  for (const [bx, by, br] of blastSpots) {
+    const bGrad = groundCtx.createRadialGradient(bx, by, 8, bx, by, br);
+    bGrad.addColorStop(0, 'rgba(8, 8, 10, 0.85)');
+    bGrad.addColorStop(0.4, 'rgba(18, 16, 15, 0.55)');
+    bGrad.addColorStop(0.8, 'rgba(35, 30, 25, 0.2)');
+    bGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    groundCtx.fillStyle = bGrad;
+    groundCtx.fillRect(bx - br, by - br, br * 2, br * 2);
+
+    // Radiating blast shrapnel streaks
+    groundCtx.strokeStyle = 'rgba(5, 5, 5, 0.6)';
+    groundCtx.lineWidth = 1.8;
+    for (let a = 0; a < Math.PI * 2; a += 0.45) {
+      const len = br * (0.6 + Math.random() * 0.4);
+      groundCtx.beginPath();
+      groundCtx.moveTo(bx, by);
+      groundCtx.lineTo(bx + Math.cos(a) * len, by + Math.sin(a) * len);
+      groundCtx.stroke();
+    }
+  }
+
+  // Organic desert sand drifts and dust settling across the ground
   const wearDrift = groundCtx.createRadialGradient(512, 512, 80, 512, 512, 600);
-  wearDrift.addColorStop(0, 'rgba(40, 36, 32, 0.15)');
-  wearDrift.addColorStop(0.5, 'rgba(25, 22, 19, 0.25)');
-  wearDrift.addColorStop(1, 'rgba(12, 10, 8, 0.45)');
+  wearDrift.addColorStop(0, 'rgba(75, 60, 40, 0.12)');
+  wearDrift.addColorStop(0.5, 'rgba(50, 40, 28, 0.22)');
+  wearDrift.addColorStop(1, 'rgba(12, 10, 8, 0.48)');
   groundCtx.fillStyle = wearDrift;
   groundCtx.fillRect(0, 0, 1024, 1024);
 
   addNoise(groundCtx, 1024, 1024, 0.12);
   const sandGroundMap = registerTex(groundCanvas, true, 8, 8);
 
-  // Dedicated Stone Flagstone Bump Map
+  // Dedicated Stone Flagstone Bump Map (with tire tracks & crater relief)
   const [stoneBumpCanvas, stoneBumpCtx] = createCanvas(1024, 1024);
-  stoneBumpCtx.fillStyle = '#202020';
+  stoneBumpCtx.fillStyle = '#181818';
   stoneBumpCtx.fillRect(0, 0, 1024, 1024);
   curY = 0;
   for (let r = 0; r < rowHeights.length; r++) {
@@ -368,26 +511,31 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
     let curX = -((r * 47) % 60);
     while (curX < 1024) {
       const sw = 75 + Math.floor(((r * 31 + curX * 17) % 85));
-      const mortarGap = 3;
+      const mortarGap = 3.5;
       const bx = curX + mortarGap;
       const by = curY + mortarGap;
       const bw = Math.min(sw - mortarGap * 2, 1024 - bx);
       const bh = rh - mortarGap * 2;
       if (bw > 4 && bh > 4) {
         const hash = Math.abs(Math.sin(bx * 12.9898 + by * 78.233) * 43758.5453);
-        const stoneHeight = 160 + Math.floor(hash * 60);
+        const stoneHeight = 160 + Math.floor(hash * 65);
         stoneBumpCtx.fillStyle = `rgb(${stoneHeight}, ${stoneHeight}, ${stoneHeight})`;
         stoneBumpCtx.fillRect(bx, by, bw, bh);
         stoneBumpCtx.fillStyle = '#ffffff';
         stoneBumpCtx.fillRect(bx, by, bw, 2);
         stoneBumpCtx.fillRect(bx, by, 2, bh);
-        stoneBumpCtx.fillStyle = '#606060';
+        stoneBumpCtx.fillStyle = '#505050';
         stoneBumpCtx.fillRect(bx, by + bh - 2, bw, 2);
         stoneBumpCtx.fillRect(bx + bw - 2, by, 2, bh);
       }
       curX += sw;
     }
     curY += rh;
+  }
+  // Bump channels for tire tread ruts
+  for (const tc of trackCenters) {
+    stoneBumpCtx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    stoneBumpCtx.fillRect(tc - 30, 0, 60, 1024);
   }
   addNoise(stoneBumpCtx, 1024, 1024, 0.35);
   const stoneBumpMap = registerTex(stoneBumpCanvas, false, 8, 8);
@@ -445,8 +593,8 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
       color: 0xffffff,
       map: sandGroundMap,
       bumpMap: stoneBumpMap,
-      bumpScale: 0.06,
-      roughness: 0.88,
+      bumpScale: 0.08,
+      roughness: 0.86,
       metalness: 0.04,
     }),
     plaster_trim: new THREE.MeshStandardMaterial({
@@ -559,50 +707,89 @@ export function createProceduralMaterials(maxAnisotropy = 8): MaterialBundle {
   };
 
   /**
-   * Creates the red Bombsite A / B floor decal material matching the blueprint image
+   * Creates the tactical battle-worn Bombsite A / B floor decal with hazard stripes & crosshairs
    */
   const createBombsiteFloorMaterial = (site: 'A' | 'B'): THREE.MeshStandardMaterial => {
     const [c, ctx] = createCanvas(512, 512);
-    ctx.fillStyle = 'rgba(153, 27, 27, 0.52)';
+    ctx.fillStyle = 'rgba(140, 24, 24, 0.58)';
     ctx.fillRect(0, 0, 512, 512);
 
-    // Bright red tactical border + corner brackets
+    // Diagonal Yellow & Black tactical hazard stripes along the border
+    const hazardSize = 24;
+    for (let x = 0; x < 512; x += hazardSize) {
+      ctx.fillStyle = '#eab308';
+      ctx.fillRect(x, 0, hazardSize * 0.5, 20);
+      ctx.fillRect(x, 492, hazardSize * 0.5, 20);
+      ctx.fillStyle = '#18181b';
+      ctx.fillRect(x + hazardSize * 0.5, 0, hazardSize * 0.5, 20);
+      ctx.fillRect(x + hazardSize * 0.5, 492, hazardSize * 0.5, 20);
+    }
+    for (let y = 0; y < 512; y += hazardSize) {
+      ctx.fillStyle = '#eab308';
+      ctx.fillRect(0, y, 20, hazardSize * 0.5);
+      ctx.fillRect(492, y, 20, hazardSize * 0.5);
+      ctx.fillStyle = '#18181b';
+      ctx.fillRect(0, y + hazardSize * 0.5, 20, hazardSize * 0.5);
+      ctx.fillRect(492, y + hazardSize * 0.5, 20, hazardSize * 0.5);
+    }
+
+    // Inner bright red tactical perimeter
     ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 14;
-    ctx.strokeRect(7, 7, 498, 498);
+    ctx.lineWidth = 6;
+    ctx.strokeRect(26, 26, 460, 460);
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(24, 24, 464, 464);
+    // Targeting crosshair lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(256, 32);
+    ctx.lineTo(256, 120);
+    ctx.moveTo(256, 360);
+    ctx.lineTo(256, 448);
+    ctx.moveTo(32, 240);
+    ctx.lineTo(120, 240);
+    ctx.moveTo(360, 240);
+    ctx.lineTo(448, 240);
+    ctx.stroke();
 
-    // Large white 'A' or 'B' with red glow in center
+    // Large white 'A' or 'B' with red tactical glow
     ctx.shadowColor = '#ef4444';
     ctx.shadowBlur = 24;
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 240px Rajdhani, sans-serif';
+    ctx.font = 'bold 220px Rajdhani, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(site, 256, 246);
+    ctx.fillText(site, 256, 236);
     ctx.shadowBlur = 0;
 
     // Bottom pill badge 'A SITE' / 'B SITE'
-    ctx.fillStyle = '#dc2626';
-    ctx.fillRect(146, 420, 220, 56);
+    ctx.fillStyle = '#b91c1c';
+    ctx.fillRect(136, 410, 240, 56);
     ctx.strokeStyle = '#fca5a5';
     ctx.lineWidth = 3;
-    ctx.strokeRect(146, 420, 220, 56);
+    ctx.strokeRect(136, 410, 240, 56);
     ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 36px Rajdhani, sans-serif';
-    ctx.fillText(`${site} SITE`, 256, 450);
+    ctx.font = 'bold 34px Rajdhani, sans-serif';
+    ctx.fillText(`ZONE ${site} // C4`, 256, 440);
+
+    // Explosive soot scorch in corner
+    const bGrad = ctx.createRadialGradient(380, 360, 10, 380, 360, 120);
+    bGrad.addColorStop(0, 'rgba(10, 8, 8, 0.85)');
+    bGrad.addColorStop(0.5, 'rgba(20, 15, 12, 0.45)');
+    bGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = bGrad;
+    ctx.fillRect(260, 240, 240, 240);
+
+    addNoise(ctx, 512, 512, 0.12);
 
     const tex = registerTex(c, true, 1, 1);
     const mat = new THREE.MeshStandardMaterial({
       map: tex,
       bumpMap: stoneBumpMap,
-      bumpScale: 0.04,
+      bumpScale: 0.05,
       transparent: true,
-      roughness: 0.75,
-      metalness: 0.1,
+      roughness: 0.82,
+      metalness: 0.08,
       polygonOffset: true,
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -1,
