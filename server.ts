@@ -44,6 +44,14 @@ interface LobbyPlayer {
   isHost: boolean;
 }
 
+// Global crash safeguards so malformed packets / internal errors never exit the server process
+process.on('uncaughtException', (err) => {
+  console.error('[DustAlley Server SAFEGUARD] Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[DustAlley Server SAFEGUARD] Unhandled Rejection:', reason);
+});
+
 interface RoomSession {
   code: string;
   hostId: string;
@@ -69,7 +77,17 @@ interface RoomSession {
       defusing: boolean;
     }
   >;
+  lastActivity: number;
 }
+
+// Anti-DDoS and rate-limiting limits
+const MAX_GLOBAL_ROOMS = 40;
+const MAX_CONCURRENT_PER_IP = 8;
+const MAX_ROOM_CREATES_PER_MIN = 3;
+const MAX_WS_MSG_PER_SEC = 35;
+
+const ipConnections = new Map<string, number>();
+const ipRoomCreates = new Map<string, number[]>();
 
 const rooms = new Map<string, RoomSession>();
 const clientToRoom = new Map<string, string>();
@@ -189,20 +207,24 @@ function setupServerRound(room: RoomSession, isPistolRound: boolean): void {
   const tActors: ActorState[] = [];
 
   for (const actor of room.actors) {
+    const survivedPrevious = actor.alive && !isPistolRound;
     actor.alive = true;
     actor.hp = 100;
     actor.velocity = [0, 0, 0];
     actor.crouching = false;
     actor.hasC4 = false;
 
-    if (isPistolRound) {
-      actor.money = ECONOMY_CONSTANTS.START_MONEY;
+    if (isPistolRound || !survivedPrevious) {
       actor.armor = 0;
       actor.hasHelmet = false;
       actor.hasDefuseKit = false;
       actor.primaryWeapon = null;
       actor.secondaryWeapon = getStartingPistol(actor.team);
+      actor.activeWeapon = actor.secondaryWeapon;
       actor.grenades = [];
+      if (isPistolRound) {
+        actor.money = ECONOMY_CONSTANTS.START_MONEY;
+      }
     }
 
     // Bots buy equipment automatically when enabled
@@ -408,6 +430,15 @@ function handleServerHitscan(
   if (hitActor.hp <= 0) {
     hitActor.alive = false;
     hitActor.deaths += 1;
+    // Strip weapons & armor upon death
+    hitActor.primaryWeapon = null;
+    hitActor.secondaryWeapon = getStartingPistol(hitActor.team);
+    hitActor.activeWeapon = hitActor.secondaryWeapon;
+    hitActor.grenades = [];
+    hitActor.armor = 0;
+    hitActor.hasHelmet = false;
+    hitActor.hasDefuseKit = false;
+
     shooter.kills += 1;
     shooter.money = clampMoney(shooter.money + spec.killReward);
 
@@ -507,27 +538,75 @@ function endServerRound(
   });
 }
 
+function getClientIp(req: http.IncomingMessage): string {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.socket.remoteAddress || 'unknown';
+}
+
 async function startServer() {
   const app = express();
+  app.disable('x-powered-by');
   const httpServer = http.createServer(app);
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 });
 
   httpServer.on('upgrade', (request, socket, head) => {
     const pathname = request.url ? request.url.split('?')[0] : '';
-    if (pathname === '/ws-game') {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
-      });
+    if (pathname !== '/ws-game') {
+      socket.destroy();
+      return;
     }
+
+    const ip = getClientIp(request);
+    const currentIpConns = ipConnections.get(ip) || 0;
+    if (currentIpConns >= MAX_CONCURRENT_PER_IP) {
+      socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
   });
 
   app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', rooms: rooms.size });
+    res.json({
+      status: 'ok',
+      rooms: rooms.size,
+      uptime: Math.round(process.uptime()),
+    });
   });
 
-  wss.on('connection', (ws: WebSocket) => {
+  // Background cleaner for empty / inactive rooms every 30s
+  setInterval(() => {
+    const now = Date.now();
+    for (const [code, room] of rooms.entries()) {
+      if (room.players.size === 0 || now - room.lastActivity > 600000) {
+        rooms.delete(code);
+      }
+    }
+  }, 30000);
+
+  wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
+    const ip = getClientIp(req);
+    ipConnections.set(ip, (ipConnections.get(ip) || 0) + 1);
+
     const clientId = `player_${nextClientSeq++}_${Math.random().toString(36).slice(2, 6)}`;
     sendToSocket(ws, 'welcome', { clientId });
+
+    let msgCountInSec = 0;
+    let secWindowStart = Date.now();
+    let violationStrikes = 0;
+
+    const cleanupClient = () => {
+      const cur = ipConnections.get(ip) || 1;
+      if (cur <= 1) ipConnections.delete(ip);
+      else ipConnections.set(ip, cur - 1);
+      removeClientFromCurrentRoom();
+    };
 
     const removeClientFromCurrentRoom = () => {
       const code = clientToRoom.get(clientId);
@@ -552,26 +631,67 @@ async function startServer() {
       }
     };
 
+    ws.on('close', cleanupClient);
+    ws.on('error', cleanupClient);
+
     ws.on('message', (rawBuf) => {
+      const now = Date.now();
+      if (now - secWindowStart >= 1000) {
+        secWindowStart = now;
+        msgCountInSec = 0;
+      }
+      msgCountInSec++;
+
+      // Anti-DDoS packet flooder protection
+      if (msgCountInSec > MAX_WS_MSG_PER_SEC) {
+        violationStrikes++;
+        if (violationStrikes > 3) {
+          try {
+            ws.close(1008, 'Rate limit exceeded');
+          } catch {}
+        }
+        return;
+      }
+
       let packet: { type: string; payload?: Record<string, unknown> };
       try {
         packet = JSON.parse(String(rawBuf));
       } catch {
         return;
       }
+      if (!packet || typeof packet !== 'object') return;
 
       const { type, payload = {} } = packet;
 
       if (type === 'room:create') {
+        if (rooms.size >= MAX_GLOBAL_ROOMS) {
+          sendToSocket(ws, 'room:error', {
+            message: 'Serwer osiągnął limit aktywnych pokojów. Spróbuj za chwilę.',
+          });
+          return;
+        }
+
+        const createTimes = (ipRoomCreates.get(ip) || []).filter(
+          (t) => now - t < 60000
+        );
+        if (createTimes.length >= MAX_ROOM_CREATES_PER_MIN) {
+          sendToSocket(ws, 'room:error', {
+            message: 'Zbyt częste tworzenie pokojów. Odczekaj chwilę.',
+          });
+          return;
+        }
+        createTimes.push(now);
+        ipRoomCreates.set(ip, createTimes);
+
         removeClientFromCurrentRoom();
         const code = generateRoomCode();
-        const name = String(payload.name || 'Gracz').slice(0, 18);
+        const name = String(payload.name || 'Gracz').trim().slice(0, 18);
         const team: Team = payload.team === 'T' ? 'T' : 'CT';
         const fillWithBots = Boolean(payload.fillWithBots);
 
         const player: LobbyPlayer = {
           id: clientId,
-          name,
+          name: name || 'Gracz',
           team,
           isHost: true,
         };
@@ -595,6 +715,7 @@ async function startServer() {
           actors: [],
           spawnPositions: new Map(),
           playerInputs: new Map(),
+          lastActivity: Date.now(),
         };
 
         rooms.set(code, room);
@@ -778,6 +899,7 @@ async function startServer() {
         if (!code) return;
         const room = rooms.get(code);
         if (!room || !room.started) return;
+        room.lastActivity = Date.now();
 
         const actor = room.actors.find((a) => a.id === clientId);
         if (!actor || !actor.alive) return;
@@ -792,15 +914,27 @@ async function startServer() {
             actor.position = [sp.x, sp.y, sp.z];
           }
           actor.velocity = [0, 0, 0];
-        } else if (pos && vel) {
-          actor.position = pos;
-          actor.velocity = vel;
+        } else if (
+          pos &&
+          vel &&
+          Array.isArray(pos) &&
+          Array.isArray(vel) &&
+          Number.isFinite(pos[0]) &&
+          Number.isFinite(pos[1]) &&
+          Number.isFinite(pos[2])
+        ) {
+          actor.position = [pos[0], pos[1], pos[2]];
+          actor.velocity = [vel[0], vel[1], vel[2]];
         }
 
-        if (typeof payload.yaw === 'number') actor.yaw = payload.yaw;
-        if (typeof payload.pitch === 'number') actor.pitch = payload.pitch;
+        if (typeof payload.yaw === 'number' && Number.isFinite(payload.yaw)) {
+          actor.yaw = payload.yaw;
+        }
+        if (typeof payload.pitch === 'number' && Number.isFinite(payload.pitch)) {
+          actor.pitch = payload.pitch;
+        }
         actor.crouching = Boolean(payload.crouching);
-        if (typeof payload.activeWeapon === 'string') {
+        if (typeof payload.activeWeapon === 'string' && payload.activeWeapon in WEAPONS_DB) {
           actor.activeWeapon = payload.activeWeapon as WeaponId;
         }
 
@@ -820,16 +954,74 @@ async function startServer() {
         if (!code) return;
         const room = rooms.get(code);
         if (!room || !room.started || room.roundPhase === 'buy') return;
+        room.lastActivity = Date.now();
 
         const actor = room.actors.find((a) => a.id === clientId);
         if (!actor || !actor.alive) return;
-        if (typeof payload.weaponId === 'string') {
+
+        // Anti-fire-flood rate limit
+        if (actor.fireCooldown > 0) return;
+        const spec = WEAPONS_DB[actor.activeWeapon];
+        actor.fireCooldown = spec ? Math.max(0.05, (60 / spec.fireRate) * 0.75) : 0.08;
+
+        if (typeof payload.weaponId === 'string' && payload.weaponId in WEAPONS_DB) {
           actor.activeWeapon = payload.weaponId as WeaponId;
         }
         const origin = payload.origin as [number, number, number] | undefined;
         const dir = payload.dir as [number, number, number] | undefined;
-        if (origin && dir) {
+        if (
+          origin &&
+          dir &&
+          Array.isArray(origin) &&
+          Array.isArray(dir) &&
+          Number.isFinite(origin[0]) &&
+          Number.isFinite(dir[0])
+        ) {
           handleServerHitscan(room, actor, origin, dir);
+        }
+        return;
+      }
+
+      if (type === 'player:throw_grenade') {
+        const code = clientToRoom.get(clientId);
+        if (!code) return;
+        const room = rooms.get(code);
+        if (!room || !room.started || room.roundPhase === 'buy') return;
+        room.lastActivity = Date.now();
+
+        const actor = room.actors.find((a) => a.id === clientId);
+        if (!actor || !actor.alive) return;
+
+        const nadeId = String(payload.nadeId || '') as WeaponId;
+        const idx = actor.grenades.indexOf(nadeId);
+        if (idx === -1) return; // Player doesn't own this grenade!
+
+        if (actor.utilityCooldown > 0) return;
+        actor.utilityCooldown = 0.5;
+
+        // Remove grenade from server inventory so future snapshots don't return it
+        actor.grenades.splice(idx, 1);
+        actor.activeWeapon = actor.primaryWeapon || actor.secondaryWeapon;
+
+        const origin = payload.origin as [number, number, number] | undefined;
+        const velocity = payload.velocity as [number, number, number] | undefined;
+        if (origin && velocity) {
+          for (const [sId, sWs] of room.sockets.entries()) {
+            if (sId !== clientId && sWs.readyState === WebSocket.OPEN) {
+              sWs.send(
+                JSON.stringify({
+                  type: 'match:throw_grenade',
+                  payload: {
+                    throwerId: clientId,
+                    throwerTeam: actor.team,
+                    nadeId,
+                    origin,
+                    velocity,
+                  },
+                })
+              );
+            }
+          }
         }
         return;
       }
@@ -839,6 +1031,7 @@ async function startServer() {
         if (!code) return;
         const room = rooms.get(code);
         if (!room || room.roundPhase !== 'buy') return;
+        room.lastActivity = Date.now();
         const actor = room.actors.find((a) => a.id === clientId);
         if (!actor || !actor.alive) return;
 
@@ -905,73 +1098,75 @@ async function startServer() {
       }
 
       if (type === 'room:leave') {
-        removeClientFromCurrentRoom();
+        cleanupClient();
       }
     });
 
-    ws.on('close', removeClientFromCurrentRoom);
+    ws.on('close', cleanupClient);
   });
 
   // Authoritative 20 Hz server simulation & snapshot broadcast loop
   const TICK_DT = 0.05;
   setInterval(() => {
     const nowSec = performance.now() / 1000;
-    for (const room of rooms.values()) {
-      if (!room.started) continue;
+    for (const [code, room] of rooms.entries()) {
+      try {
+        if (!room.started) continue;
 
-      room.phaseTimer -= TICK_DT;
+        room.phaseTimer -= TICK_DT;
 
-      if (room.roundPhase === 'buy' && room.phaseTimer <= 0) {
-        room.roundPhase = 'live';
-        room.phaseTimer = 115;
-      } else if (room.roundPhase === 'live' && room.phaseTimer <= 0) {
-        endServerRound(room, 'CT', 'Czas rundy dobiegł końca — obrona CT');
-      } else if (room.roundPhase === 'round_end' && room.phaseTimer <= 0) {
-        broadcastToRoom(room, 'match:round_end', null);
-        room.roundNumber += 1;
-        setupServerRound(room, false);
-      }
-
-      // Update server-side bots (only present if fillWithBots is enabled)
-      for (const actor of room.actors) {
-        if (actor.isBot && actor.alive) {
-          actor.fireCooldown = Math.max(0, actor.fireCooldown - TICK_DT);
-          actor.reloadTimer = Math.max(0, actor.reloadTimer - TICK_DT);
-          updateBotAI(
-            actor,
-            room.actors,
-            room.bomb,
-            room.roundPhase,
-            room.tStrategy,
-            'medium',
-            serverPhysics,
-            serverNav,
-            [],
-            nowSec,
-            TICK_DT,
-            {
-              onFireWeapon: (bot) => {
-                if (bot.fireCooldown > 0) return;
-                const spec = WEAPONS_DB[bot.activeWeapon];
-                bot.fireCooldown = 60 / spec.fireRate;
-                const origin: [number, number, number] = [
-                  bot.position[0],
-                  bot.position[1] + 1.5,
-                  bot.position[2],
-                ];
-                const dir: [number, number, number] = [
-                  -Math.sin(bot.yaw) * Math.cos(bot.pitch),
-                  Math.sin(bot.pitch),
-                  -Math.cos(bot.yaw) * Math.cos(bot.pitch),
-                ];
-                handleServerHitscan(room, bot, origin, dir);
-              },
-              onThrowGrenade: () => {},
-              onRadioCallout: () => {},
-            }
-          );
+        if (room.roundPhase === 'buy' && room.phaseTimer <= 0) {
+          room.roundPhase = 'live';
+          room.phaseTimer = 115;
+        } else if (room.roundPhase === 'live' && room.phaseTimer <= 0) {
+          endServerRound(room, 'CT', 'Czas rundy dobiegł końca — obrona CT');
+        } else if (room.roundPhase === 'round_end' && room.phaseTimer <= 0) {
+          broadcastToRoom(room, 'match:round_end', null);
+          room.roundNumber += 1;
+          setupServerRound(room, false);
         }
-      }
+
+        // Update cooldowns for all actors & run bot AI
+        for (const actor of room.actors) {
+          actor.fireCooldown = Math.max(0, actor.fireCooldown - TICK_DT);
+          actor.utilityCooldown = Math.max(0, actor.utilityCooldown - TICK_DT);
+          if (actor.isBot && actor.alive) {
+            actor.reloadTimer = Math.max(0, actor.reloadTimer - TICK_DT);
+            updateBotAI(
+              actor,
+              room.actors,
+              room.bomb,
+              room.roundPhase,
+              room.tStrategy,
+              'medium',
+              serverPhysics,
+              serverNav,
+              [],
+              nowSec,
+              TICK_DT,
+              {
+                onFireWeapon: (bot) => {
+                  if (bot.fireCooldown > 0) return;
+                  const spec = WEAPONS_DB[bot.activeWeapon];
+                  bot.fireCooldown = 60 / spec.fireRate;
+                  const origin: [number, number, number] = [
+                    bot.position[0],
+                    bot.position[1] + 1.5,
+                    bot.position[2],
+                  ];
+                  const dir: [number, number, number] = [
+                    -Math.sin(bot.yaw) * Math.cos(bot.pitch),
+                    Math.sin(bot.pitch),
+                    -Math.cos(bot.yaw) * Math.cos(bot.pitch),
+                  ];
+                  handleServerHitscan(room, bot, origin, dir);
+                },
+                onThrowGrenade: () => {},
+                onRadioCallout: () => {},
+              }
+            );
+          }
+        }
 
       // Dropped C4 pickup by alive T players
       if (room.bomb.state === 'dropped') {
@@ -1094,6 +1289,9 @@ async function startServer() {
       checkServerTeamElimination(room);
 
       broadcastToRoom(room, 'match:snapshot', buildSnapshot(room));
+      } catch (err) {
+        console.error(`[SIMULATION ERROR in room ${code}]:`, err);
+      }
     }
   }, 50);
 

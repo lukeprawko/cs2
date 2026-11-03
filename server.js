@@ -1832,6 +1832,18 @@ function executeBotAutoBuy(state, preferSniper = false) {
 }
 
 // server.ts
+process.on("uncaughtException", (err) => {
+  console.error("[DustAlley Server SAFEGUARD] Uncaught Exception:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[DustAlley Server SAFEGUARD] Unhandled Rejection:", reason);
+});
+var MAX_GLOBAL_ROOMS = 40;
+var MAX_CONCURRENT_PER_IP = 8;
+var MAX_ROOM_CREATES_PER_MIN = 3;
+var MAX_WS_MSG_PER_SEC = 35;
+var ipConnections = /* @__PURE__ */ new Map();
+var ipRoomCreates = /* @__PURE__ */ new Map();
 var rooms = /* @__PURE__ */ new Map();
 var clientToRoom = /* @__PURE__ */ new Map();
 var serverPhysics = new PhysicsWorld(DUST_ALLEY_BOXES);
@@ -1932,19 +1944,23 @@ function setupServerRound(room, isPistolRound) {
   let tIdx = 0;
   const tActors = [];
   for (const actor of room.actors) {
+    const survivedPrevious = actor.alive && !isPistolRound;
     actor.alive = true;
     actor.hp = 100;
     actor.velocity = [0, 0, 0];
     actor.crouching = false;
     actor.hasC4 = false;
-    if (isPistolRound) {
-      actor.money = ECONOMY_CONSTANTS.START_MONEY;
+    if (isPistolRound || !survivedPrevious) {
       actor.armor = 0;
       actor.hasHelmet = false;
       actor.hasDefuseKit = false;
       actor.primaryWeapon = null;
       actor.secondaryWeapon = getStartingPistol(actor.team);
+      actor.activeWeapon = actor.secondaryWeapon;
       actor.grenades = [];
+      if (isPistolRound) {
+        actor.money = ECONOMY_CONSTANTS.START_MONEY;
+      }
     }
     if (actor.isBot) {
       const bought = executeBotAutoBuy(
@@ -2112,6 +2128,13 @@ function handleServerHitscan(room, shooter, origin, dir) {
   if (hitActor.hp <= 0) {
     hitActor.alive = false;
     hitActor.deaths += 1;
+    hitActor.primaryWeapon = null;
+    hitActor.secondaryWeapon = getStartingPistol(hitActor.team);
+    hitActor.activeWeapon = hitActor.secondaryWeapon;
+    hitActor.grenades = [];
+    hitActor.armor = 0;
+    hitActor.hasHelmet = false;
+    hitActor.hasDefuseKit = false;
     shooter.kills += 1;
     shooter.money = clampMoney(shooter.money + spec.killReward);
     if (hitActor.hasC4) {
@@ -2184,24 +2207,64 @@ function endServerRound(room, winner, reason) {
     mvpReason: "Najwi\u0119kszy wk\u0142ad w wygran\u0105 rundy"
   });
 }
+function getClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") {
+    return forwarded.split(",")[0].trim();
+  }
+  return req.socket.remoteAddress || "unknown";
+}
 async function startServer() {
   const app = express();
+  app.disable("x-powered-by");
   const httpServer = http.createServer(app);
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 });
   httpServer.on("upgrade", (request, socket, head) => {
     const pathname = request.url ? request.url.split("?")[0] : "";
-    if (pathname === "/ws-game") {
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit("connection", ws, request);
-      });
+    if (pathname !== "/ws-game") {
+      socket.destroy();
+      return;
     }
+    const ip = getClientIp(request);
+    const currentIpConns = ipConnections.get(ip) || 0;
+    if (currentIpConns >= MAX_CONCURRENT_PER_IP) {
+      socket.write("HTTP/1.1 429 Too Many Requests\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
   });
   app.get("/api/health", (_req, res) => {
-    res.json({ status: "ok", rooms: rooms.size });
+    res.json({
+      status: "ok",
+      rooms: rooms.size,
+      uptime: Math.round(process.uptime())
+    });
   });
-  wss.on("connection", (ws) => {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [code, room] of rooms.entries()) {
+      if (room.players.size === 0 || now - room.lastActivity > 6e5) {
+        rooms.delete(code);
+      }
+    }
+  }, 3e4);
+  wss.on("connection", (ws, req) => {
+    const ip = getClientIp(req);
+    ipConnections.set(ip, (ipConnections.get(ip) || 0) + 1);
     const clientId = `player_${nextClientSeq++}_${Math.random().toString(36).slice(2, 6)}`;
     sendToSocket(ws, "welcome", { clientId });
+    let msgCountInSec = 0;
+    let secWindowStart = Date.now();
+    let violationStrikes = 0;
+    const cleanupClient = () => {
+      const cur = ipConnections.get(ip) || 1;
+      if (cur <= 1) ipConnections.delete(ip);
+      else ipConnections.set(ip, cur - 1);
+      removeClientFromCurrentRoom();
+    };
     const removeClientFromCurrentRoom = () => {
       const code = clientToRoom.get(clientId);
       if (!code) return;
@@ -2224,23 +2287,59 @@ async function startServer() {
         emitRoomLobbyState(room);
       }
     };
+    ws.on("close", cleanupClient);
+    ws.on("error", cleanupClient);
     ws.on("message", (rawBuf) => {
+      const now = Date.now();
+      if (now - secWindowStart >= 1e3) {
+        secWindowStart = now;
+        msgCountInSec = 0;
+      }
+      msgCountInSec++;
+      if (msgCountInSec > MAX_WS_MSG_PER_SEC) {
+        violationStrikes++;
+        if (violationStrikes > 3) {
+          try {
+            ws.close(1008, "Rate limit exceeded");
+          } catch {
+          }
+        }
+        return;
+      }
       let packet;
       try {
         packet = JSON.parse(String(rawBuf));
       } catch {
         return;
       }
+      if (!packet || typeof packet !== "object") return;
       const { type, payload = {} } = packet;
       if (type === "room:create") {
+        if (rooms.size >= MAX_GLOBAL_ROOMS) {
+          sendToSocket(ws, "room:error", {
+            message: "Serwer osi\u0105gn\u0105\u0142 limit aktywnych pokoj\xF3w. Spr\xF3buj za chwil\u0119."
+          });
+          return;
+        }
+        const createTimes = (ipRoomCreates.get(ip) || []).filter(
+          (t) => now - t < 6e4
+        );
+        if (createTimes.length >= MAX_ROOM_CREATES_PER_MIN) {
+          sendToSocket(ws, "room:error", {
+            message: "Zbyt cz\u0119ste tworzenie pokoj\xF3w. Odczekaj chwil\u0119."
+          });
+          return;
+        }
+        createTimes.push(now);
+        ipRoomCreates.set(ip, createTimes);
         removeClientFromCurrentRoom();
         const code = generateRoomCode();
-        const name = String(payload.name || "Gracz").slice(0, 18);
+        const name = String(payload.name || "Gracz").trim().slice(0, 18);
         const team = payload.team === "T" ? "T" : "CT";
         const fillWithBots = Boolean(payload.fillWithBots);
         const player = {
           id: clientId,
-          name,
+          name: name || "Gracz",
           team,
           isHost: true
         };
@@ -2262,7 +2361,8 @@ async function startServer() {
           bomb: createInitialBombData(null, [3.5, 0, 20.2]),
           actors: [],
           spawnPositions: /* @__PURE__ */ new Map(),
-          playerInputs: /* @__PURE__ */ new Map()
+          playerInputs: /* @__PURE__ */ new Map(),
+          lastActivity: Date.now()
         };
         rooms.set(code, room);
         clientToRoom.set(clientId, code);
@@ -2429,6 +2529,7 @@ async function startServer() {
         if (!code) return;
         const room = rooms.get(code);
         if (!room || !room.started) return;
+        room.lastActivity = Date.now();
         const actor = room.actors.find((a) => a.id === clientId);
         if (!actor || !actor.alive) return;
         const pos = payload.position;
@@ -2439,14 +2540,18 @@ async function startServer() {
             actor.position = [sp.x, sp.y, sp.z];
           }
           actor.velocity = [0, 0, 0];
-        } else if (pos && vel) {
-          actor.position = pos;
-          actor.velocity = vel;
+        } else if (pos && vel && Array.isArray(pos) && Array.isArray(vel) && Number.isFinite(pos[0]) && Number.isFinite(pos[1]) && Number.isFinite(pos[2])) {
+          actor.position = [pos[0], pos[1], pos[2]];
+          actor.velocity = [vel[0], vel[1], vel[2]];
         }
-        if (typeof payload.yaw === "number") actor.yaw = payload.yaw;
-        if (typeof payload.pitch === "number") actor.pitch = payload.pitch;
+        if (typeof payload.yaw === "number" && Number.isFinite(payload.yaw)) {
+          actor.yaw = payload.yaw;
+        }
+        if (typeof payload.pitch === "number" && Number.isFinite(payload.pitch)) {
+          actor.pitch = payload.pitch;
+        }
         actor.crouching = Boolean(payload.crouching);
-        if (typeof payload.activeWeapon === "string") {
+        if (typeof payload.activeWeapon === "string" && payload.activeWeapon in WEAPONS_DB) {
           actor.activeWeapon = payload.activeWeapon;
         }
         room.playerInputs.set(clientId, {
@@ -2463,15 +2568,56 @@ async function startServer() {
         if (!code) return;
         const room = rooms.get(code);
         if (!room || !room.started || room.roundPhase === "buy") return;
+        room.lastActivity = Date.now();
         const actor = room.actors.find((a) => a.id === clientId);
         if (!actor || !actor.alive) return;
-        if (typeof payload.weaponId === "string") {
+        if (actor.fireCooldown > 0) return;
+        const spec = WEAPONS_DB[actor.activeWeapon];
+        actor.fireCooldown = spec ? Math.max(0.05, 60 / spec.fireRate * 0.75) : 0.08;
+        if (typeof payload.weaponId === "string" && payload.weaponId in WEAPONS_DB) {
           actor.activeWeapon = payload.weaponId;
         }
         const origin = payload.origin;
         const dir = payload.dir;
-        if (origin && dir) {
+        if (origin && dir && Array.isArray(origin) && Array.isArray(dir) && Number.isFinite(origin[0]) && Number.isFinite(dir[0])) {
           handleServerHitscan(room, actor, origin, dir);
+        }
+        return;
+      }
+      if (type === "player:throw_grenade") {
+        const code = clientToRoom.get(clientId);
+        if (!code) return;
+        const room = rooms.get(code);
+        if (!room || !room.started || room.roundPhase === "buy") return;
+        room.lastActivity = Date.now();
+        const actor = room.actors.find((a) => a.id === clientId);
+        if (!actor || !actor.alive) return;
+        const nadeId = String(payload.nadeId || "");
+        const idx = actor.grenades.indexOf(nadeId);
+        if (idx === -1) return;
+        if (actor.utilityCooldown > 0) return;
+        actor.utilityCooldown = 0.5;
+        actor.grenades.splice(idx, 1);
+        actor.activeWeapon = actor.primaryWeapon || actor.secondaryWeapon;
+        const origin = payload.origin;
+        const velocity = payload.velocity;
+        if (origin && velocity) {
+          for (const [sId, sWs] of room.sockets.entries()) {
+            if (sId !== clientId && sWs.readyState === WebSocket.OPEN) {
+              sWs.send(
+                JSON.stringify({
+                  type: "match:throw_grenade",
+                  payload: {
+                    throwerId: clientId,
+                    throwerTeam: actor.team,
+                    nadeId,
+                    origin,
+                    velocity
+                  }
+                })
+              );
+            }
+          }
         }
         return;
       }
@@ -2480,6 +2626,7 @@ async function startServer() {
         if (!code) return;
         const room = rooms.get(code);
         if (!room || room.roundPhase !== "buy") return;
+        room.lastActivity = Date.now();
         const actor = room.actors.find((a) => a.id === clientId);
         if (!actor || !actor.alive) return;
         const itemId = String(payload.itemId || "");
@@ -2537,169 +2684,174 @@ async function startServer() {
         return;
       }
       if (type === "room:leave") {
-        removeClientFromCurrentRoom();
+        cleanupClient();
       }
     });
-    ws.on("close", removeClientFromCurrentRoom);
+    ws.on("close", cleanupClient);
   });
   const TICK_DT = 0.05;
   setInterval(() => {
     const nowSec = performance.now() / 1e3;
-    for (const room of rooms.values()) {
-      if (!room.started) continue;
-      room.phaseTimer -= TICK_DT;
-      if (room.roundPhase === "buy" && room.phaseTimer <= 0) {
-        room.roundPhase = "live";
-        room.phaseTimer = 115;
-      } else if (room.roundPhase === "live" && room.phaseTimer <= 0) {
-        endServerRound(room, "CT", "Czas rundy dobieg\u0142 ko\u0144ca \u2014 obrona CT");
-      } else if (room.roundPhase === "round_end" && room.phaseTimer <= 0) {
-        broadcastToRoom(room, "match:round_end", null);
-        room.roundNumber += 1;
-        setupServerRound(room, false);
-      }
-      for (const actor of room.actors) {
-        if (actor.isBot && actor.alive) {
+    for (const [code, room] of rooms.entries()) {
+      try {
+        if (!room.started) continue;
+        room.phaseTimer -= TICK_DT;
+        if (room.roundPhase === "buy" && room.phaseTimer <= 0) {
+          room.roundPhase = "live";
+          room.phaseTimer = 115;
+        } else if (room.roundPhase === "live" && room.phaseTimer <= 0) {
+          endServerRound(room, "CT", "Czas rundy dobieg\u0142 ko\u0144ca \u2014 obrona CT");
+        } else if (room.roundPhase === "round_end" && room.phaseTimer <= 0) {
+          broadcastToRoom(room, "match:round_end", null);
+          room.roundNumber += 1;
+          setupServerRound(room, false);
+        }
+        for (const actor of room.actors) {
           actor.fireCooldown = Math.max(0, actor.fireCooldown - TICK_DT);
-          actor.reloadTimer = Math.max(0, actor.reloadTimer - TICK_DT);
-          updateBotAI(
-            actor,
-            room.actors,
-            room.bomb,
-            room.roundPhase,
-            room.tStrategy,
-            "medium",
-            serverPhysics,
-            serverNav,
-            [],
-            nowSec,
-            TICK_DT,
-            {
-              onFireWeapon: (bot) => {
-                if (bot.fireCooldown > 0) return;
-                const spec = WEAPONS_DB[bot.activeWeapon];
-                bot.fireCooldown = 60 / spec.fireRate;
-                const origin = [
-                  bot.position[0],
-                  bot.position[1] + 1.5,
-                  bot.position[2]
-                ];
-                const dir = [
-                  -Math.sin(bot.yaw) * Math.cos(bot.pitch),
-                  Math.sin(bot.pitch),
-                  -Math.cos(bot.yaw) * Math.cos(bot.pitch)
-                ];
-                handleServerHitscan(room, bot, origin, dir);
-              },
-              onThrowGrenade: () => {
-              },
-              onRadioCallout: () => {
+          actor.utilityCooldown = Math.max(0, actor.utilityCooldown - TICK_DT);
+          if (actor.isBot && actor.alive) {
+            actor.reloadTimer = Math.max(0, actor.reloadTimer - TICK_DT);
+            updateBotAI(
+              actor,
+              room.actors,
+              room.bomb,
+              room.roundPhase,
+              room.tStrategy,
+              "medium",
+              serverPhysics,
+              serverNav,
+              [],
+              nowSec,
+              TICK_DT,
+              {
+                onFireWeapon: (bot) => {
+                  if (bot.fireCooldown > 0) return;
+                  const spec = WEAPONS_DB[bot.activeWeapon];
+                  bot.fireCooldown = 60 / spec.fireRate;
+                  const origin = [
+                    bot.position[0],
+                    bot.position[1] + 1.5,
+                    bot.position[2]
+                  ];
+                  const dir = [
+                    -Math.sin(bot.yaw) * Math.cos(bot.pitch),
+                    Math.sin(bot.pitch),
+                    -Math.cos(bot.yaw) * Math.cos(bot.pitch)
+                  ];
+                  handleServerHitscan(room, bot, origin, dir);
+                },
+                onThrowGrenade: () => {
+                },
+                onRadioCallout: () => {
+                }
+              }
+            );
+          }
+        }
+        if (room.bomb.state === "dropped") {
+          for (const actor of room.actors) {
+            if (actor.alive && actor.team === "T") {
+              const dist = Math.hypot(
+                actor.position[0] - room.bomb.position[0],
+                actor.position[2] - room.bomb.position[2]
+              );
+              if (dist < 1.8) {
+                actor.hasC4 = true;
+                room.bomb.state = "carried";
+                room.bomb.carrierId = actor.id;
+                break;
               }
             }
-          );
+          }
         }
-      }
-      if (room.bomb.state === "dropped") {
-        for (const actor of room.actors) {
-          if (actor.alive && actor.team === "T") {
+        if (room.roundPhase === "live" && room.bomb.state === "carried") {
+          let planter;
+          let activeSite = null;
+          for (const actor of room.actors) {
+            if (!actor.alive || actor.team !== "T" || !actor.hasC4) continue;
+            const site = getActiveBombSite(actor.position[0], actor.position[2]);
+            const inp = room.playerInputs.get(actor.id);
+            const wantsPlant = actor.isBot ? Boolean(
+              site && Math.hypot(actor.velocity[0], actor.velocity[2]) < 0.6
+            ) : Boolean(site && inp?.planting);
+            if (wantsPlant && site) {
+              planter = actor;
+              activeSite = site;
+              break;
+            }
+          }
+          if (planter && activeSite) {
+            room.bomb.planterId = planter.id;
+            room.bomb.plantProgress += TICK_DT / BOMB_CONSTANTS.PLANT_TIME;
+            if (room.bomb.plantProgress >= 1) {
+              room.bomb.state = "planted";
+              room.bomb.site = activeSite;
+              room.bomb.carrierId = null;
+              room.bomb.planterId = null;
+              room.bomb.plantProgress = 0;
+              room.bomb.timeRemaining = BOMB_CONSTANTS.BOMB_TIMER;
+              room.bomb.position = [
+                planter.position[0],
+                planter.position[1] + 0.05,
+                planter.position[2]
+              ];
+              planter.hasC4 = false;
+              planter.money = clampMoney(
+                planter.money + ECONOMY_CONSTANTS.BOMB_PLANT_INDIVIDUAL
+              );
+              room.roundPhase = "planted";
+              room.phaseTimer = BOMB_CONSTANTS.BOMB_TIMER;
+            }
+          } else {
+            room.bomb.planterId = null;
+            room.bomb.plantProgress = 0;
+          }
+        }
+        if (room.roundPhase === "planted" && room.bomb.state === "planted") {
+          room.bomb.timeRemaining = Math.max(0, room.bomb.timeRemaining - TICK_DT);
+          room.phaseTimer = room.bomb.timeRemaining;
+          let defuser;
+          for (const actor of room.actors) {
+            if (!actor.alive || actor.team !== "CT") continue;
             const dist = Math.hypot(
               actor.position[0] - room.bomb.position[0],
               actor.position[2] - room.bomb.position[2]
             );
-            if (dist < 1.8) {
-              actor.hasC4 = true;
-              room.bomb.state = "carried";
-              room.bomb.carrierId = actor.id;
+            const inp = room.playerInputs.get(actor.id);
+            const wantsDefuse = actor.isBot ? dist <= BOMB_CONSTANTS.INTERACTION_RADIUS && Math.hypot(actor.velocity[0], actor.velocity[2]) < 0.6 : dist <= BOMB_CONSTANTS.INTERACTION_RADIUS && Boolean(inp?.defusing);
+            if (wantsDefuse) {
+              defuser = actor;
               break;
             }
           }
-        }
-      }
-      if (room.roundPhase === "live" && room.bomb.state === "carried") {
-        let planter;
-        let activeSite = null;
-        for (const actor of room.actors) {
-          if (!actor.alive || actor.team !== "T" || !actor.hasC4) continue;
-          const site = getActiveBombSite(actor.position[0], actor.position[2]);
-          const inp = room.playerInputs.get(actor.id);
-          const wantsPlant = actor.isBot ? Boolean(
-            site && Math.hypot(actor.velocity[0], actor.velocity[2]) < 0.6
-          ) : Boolean(site && inp?.planting);
-          if (wantsPlant && site) {
-            planter = actor;
-            activeSite = site;
-            break;
-          }
-        }
-        if (planter && activeSite) {
-          room.bomb.planterId = planter.id;
-          room.bomb.plantProgress += TICK_DT / BOMB_CONSTANTS.PLANT_TIME;
-          if (room.bomb.plantProgress >= 1) {
-            room.bomb.state = "planted";
-            room.bomb.site = activeSite;
-            room.bomb.carrierId = null;
-            room.bomb.planterId = null;
-            room.bomb.plantProgress = 0;
-            room.bomb.timeRemaining = BOMB_CONSTANTS.BOMB_TIMER;
-            room.bomb.position = [
-              planter.position[0],
-              planter.position[1] + 0.05,
-              planter.position[2]
-            ];
-            planter.hasC4 = false;
-            planter.money = clampMoney(
-              planter.money + ECONOMY_CONSTANTS.BOMB_PLANT_INDIVIDUAL
-            );
-            room.roundPhase = "planted";
-            room.phaseTimer = BOMB_CONSTANTS.BOMB_TIMER;
-          }
-        } else {
-          room.bomb.planterId = null;
-          room.bomb.plantProgress = 0;
-        }
-      }
-      if (room.roundPhase === "planted" && room.bomb.state === "planted") {
-        room.bomb.timeRemaining = Math.max(0, room.bomb.timeRemaining - TICK_DT);
-        room.phaseTimer = room.bomb.timeRemaining;
-        let defuser;
-        for (const actor of room.actors) {
-          if (!actor.alive || actor.team !== "CT") continue;
-          const dist = Math.hypot(
-            actor.position[0] - room.bomb.position[0],
-            actor.position[2] - room.bomb.position[2]
-          );
-          const inp = room.playerInputs.get(actor.id);
-          const wantsDefuse = actor.isBot ? dist <= BOMB_CONSTANTS.INTERACTION_RADIUS && Math.hypot(actor.velocity[0], actor.velocity[2]) < 0.6 : dist <= BOMB_CONSTANTS.INTERACTION_RADIUS && Boolean(inp?.defusing);
-          if (wantsDefuse) {
-            defuser = actor;
-            break;
-          }
-        }
-        if (defuser) {
-          room.bomb.defuserId = defuser.id;
-          room.bomb.defuserHasKit = defuser.hasDefuseKit;
-          const defuseDur = defuser.hasDefuseKit ? BOMB_CONSTANTS.DEFUSE_TIME_WITH_KIT : BOMB_CONSTANTS.DEFUSE_TIME_NO_KIT;
-          room.bomb.defuseProgress += TICK_DT / defuseDur;
-          if (room.bomb.defuseProgress >= 1) {
-            room.bomb.state = "defused";
+          if (defuser) {
+            room.bomb.defuserId = defuser.id;
+            room.bomb.defuserHasKit = defuser.hasDefuseKit;
+            const defuseDur = defuser.hasDefuseKit ? BOMB_CONSTANTS.DEFUSE_TIME_WITH_KIT : BOMB_CONSTANTS.DEFUSE_TIME_NO_KIT;
+            room.bomb.defuseProgress += TICK_DT / defuseDur;
+            if (room.bomb.defuseProgress >= 1) {
+              room.bomb.state = "defused";
+              room.bomb.defuserId = null;
+              room.bomb.defuseProgress = 0;
+              defuser.money = clampMoney(
+                defuser.money + ECONOMY_CONSTANTS.BOMB_DEFUSE_INDIVIDUAL
+              );
+              endServerRound(room, "CT", "\u0141adunek C4 zosta\u0142 rozbrojony!");
+            }
+          } else {
             room.bomb.defuserId = null;
             room.bomb.defuseProgress = 0;
-            defuser.money = clampMoney(
-              defuser.money + ECONOMY_CONSTANTS.BOMB_DEFUSE_INDIVIDUAL
-            );
-            endServerRound(room, "CT", "\u0141adunek C4 zosta\u0142 rozbrojony!");
           }
-        } else {
-          room.bomb.defuserId = null;
-          room.bomb.defuseProgress = 0;
+          if (room.bomb.state === "planted" && room.bomb.timeRemaining <= 0) {
+            room.bomb.state = "exploded";
+            endServerRound(room, "T", "\u0141adunek C4 eksplodowa\u0142!");
+          }
         }
-        if (room.bomb.state === "planted" && room.bomb.timeRemaining <= 0) {
-          room.bomb.state = "exploded";
-          endServerRound(room, "T", "\u0141adunek C4 eksplodowa\u0142!");
-        }
+        checkServerTeamElimination(room);
+        broadcastToRoom(room, "match:snapshot", buildSnapshot(room));
+      } catch (err) {
+        console.error(`[SIMULATION ERROR in room ${code}]:`, err);
       }
-      checkServerTeamElimination(room);
-      broadcastToRoom(room, "match:snapshot", buildSnapshot(room));
     }
   }, 50);
   if (process.env.NODE_ENV !== "production") {

@@ -173,6 +173,21 @@ export class GameSimulation {
     multiplayerClient.onRemoteShotCallback = (_shooterId, _weaponId, origin, target) => {
       this.spawnTracer(origin, target);
     };
+    multiplayerClient.onRemoteGrenadeThrowCallback = (data) => {
+      if (this.grenades.length >= 16) {
+        this.grenades.shift();
+      }
+      this.grenades.push({
+        id: `nade_${Date.now()}_${Math.random()}`,
+        type: data.nadeId as ActiveGrenade['type'],
+        throwerId: data.throwerId,
+        throwerTeam: data.throwerTeam,
+        position: [...data.origin],
+        velocity: [...data.velocity],
+        fuseTimer: data.nadeId === 'flashbang' ? 1.5 : 2.1,
+        detonated: false,
+      });
+    };
   }
 
   public startOfflineMatch(): void {
@@ -614,7 +629,9 @@ export class GameSimulation {
     } else if (this.input.consumeKey('Digit3')) {
       this.equipWeapon(player, 'knife');
     } else if (this.input.consumeKey('Digit4') && player.grenades.length > 0) {
-      this.equipWeapon(player, player.grenades[0]);
+      const currentIdx = player.grenades.indexOf(player.activeWeapon);
+      const nextIdx = currentIdx === -1 ? 0 : (currentIdx + 1) % player.grenades.length;
+      this.equipWeapon(player, player.grenades[nextIdx]);
     } else if (this.input.consumeKey('Digit5') && player.hasC4) {
       this.equipWeapon(player, 'c4');
     } else if (this.input.consumeKey('KeyQ')) {
@@ -1648,6 +1665,20 @@ export class GameSimulation {
     victim.koTimer = 0.01;
     killer.kills += 1;
 
+    // Reset victim inventory on death: lose primary gun, grenades, armor & defuse kit
+    victim.primaryWeapon = null;
+    victim.secondaryWeapon = getStartingPistol(victim.team);
+    victim.activeWeapon = victim.secondaryWeapon;
+    victim.grenades = [];
+    victim.armor = 0;
+    victim.hasHelmet = false;
+    victim.hasDefuseKit = false;
+
+    if (victim.id === this.localPlayerId) {
+      this.equipWeapon(victim, victim.secondaryWeapon);
+      this.syncHUD(true);
+    }
+
     const spec = WEAPONS_DB[killer.activeWeapon];
     killer.money = clampMoney(killer.money + spec.killReward);
 
@@ -1697,22 +1728,38 @@ export class GameSimulation {
     const dz = -Math.cos(player.yaw) * Math.cos(player.pitch);
     const throwSpeed = 16.5;
 
+    const origin: [number, number, number] = [
+      player.position[0] + dx * 0.5,
+      eyeY,
+      player.position[2] + dz * 0.5,
+    ];
+    const velocity: [number, number, number] = [
+      dx * throwSpeed + player.velocity[0] * 0.35,
+      dy * throwSpeed,
+      dz * throwSpeed + player.velocity[2] * 0.35,
+    ];
+
+    if (this.grenades.length >= 16) {
+      this.grenades.shift();
+    }
+
     this.grenades.push({
       id: `nade_${Date.now()}_${Math.random()}`,
       type: nadeId as ActiveGrenade['type'],
       throwerId: player.id,
       throwerTeam: player.team,
-      position: [player.position[0] + dx * 0.5, eyeY, player.position[2] + dz * 0.5],
-      velocity: [
-        dx * throwSpeed + player.velocity[0] * 0.35,
-        dy * throwSpeed,
-        dz * throwSpeed + player.velocity[2] * 0.35,
-      ],
+      position: origin,
+      velocity: velocity,
       fuseTimer: nadeId === 'flashbang' ? 1.5 : 2.1,
       detonated: false,
     });
 
+    if (useGameStore.getState().isMultiplayer) {
+      multiplayerClient.sendThrowGrenade(nadeId, origin, velocity);
+    }
+
     this.equipWeapon(player, player.primaryWeapon || player.secondaryWeapon);
+    this.syncHUD(true);
   }
 
   private botThrowGrenade(
@@ -1859,6 +1906,10 @@ export class GameSimulation {
 
     if (g.type === 'smoke_grenade') {
       audioEngine.playSmokePop(g.position);
+      // Cap maximum smoke clouds to prevent performance degradation or exploit stacking
+      if (this.smokeClouds.length >= 6) {
+        this.smokeClouds.shift();
+      }
       this.smokeClouds.push({
         id: g.id,
         position: [g.position[0], g.position[1] + 1.2, g.position[2]],
@@ -2048,6 +2099,17 @@ export class GameSimulation {
       }
       if (netActor.grenades) {
         existing.grenades = [...netActor.grenades];
+      }
+
+      if (!existing.alive) {
+        existing.primaryWeapon = null;
+        existing.grenades = [];
+        existing.armor = 0;
+        existing.hasHelmet = false;
+        existing.hasDefuseKit = false;
+        if (isSelf && existing.activeWeapon !== existing.secondaryWeapon && existing.activeWeapon !== 'knife') {
+          this.equipWeapon(existing, existing.secondaryWeapon);
+        }
       }
 
       if (isNewRound) {

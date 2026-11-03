@@ -60,6 +60,15 @@ class MultiplayerClientManager {
         target: [number, number, number]
       ) => void)
     | null = null;
+  public onRemoteGrenadeThrowCallback:
+    | ((data: {
+        throwerId: string;
+        throwerTeam: Team;
+        nadeId: WeaponId;
+        origin: [number, number, number];
+        velocity: [number, number, number];
+      }) => void)
+    | null = null;
 
   public connect(): WebSocket | null {
     if (
@@ -240,6 +249,20 @@ class MultiplayerClientManager {
       return;
     }
 
+    if (type === 'match:throw_grenade') {
+      const data = payload as {
+        throwerId: string;
+        throwerTeam: Team;
+        nadeId: WeaponId;
+        origin: [number, number, number];
+        velocity: [number, number, number];
+      };
+      if (data && this.onRemoteGrenadeThrowCallback) {
+        this.onRemoteGrenadeThrowCallback(data);
+      }
+      return;
+    }
+
     if (type === 'match:round_end') {
       useGameStore
         .getState()
@@ -331,6 +354,15 @@ class MultiplayerClientManager {
   public sendBuy(itemId: string): void {
     if (!useGameStore.getState().isMultiplayer) return;
     this.emit('player:buy', { itemId });
+  }
+
+  public sendThrowGrenade(
+    nadeId: WeaponId,
+    origin: [number, number, number],
+    velocity: [number, number, number]
+  ): void {
+    if (!useGameStore.getState().isMultiplayer) return;
+    this.emit('player:throw_grenade', { nadeId, origin, velocity });
   }
 }
 
